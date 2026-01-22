@@ -414,6 +414,7 @@ const renderWeeklyTasks = (activeMembers) => {
 
   const list = document.createElement("div");
   list.className = "stack";
+  let pendingFocusTaskId = null;
 
   const renderTaskRows = () => {
     list.innerHTML = "";
@@ -440,6 +441,13 @@ const renderWeeklyTasks = (activeMembers) => {
       labelInput.addEventListener("input", (event) => {
         task.label = event.target.value;
       });
+      if (pendingFocusTaskId === task.id) {
+        requestAnimationFrame(() => {
+          labelInput.focus();
+          labelInput.select();
+        });
+        pendingFocusTaskId = null;
+      }
 
       const summary = document.createElement("span");
       summary.className = "attendance-summary muted";
@@ -540,27 +548,26 @@ const renderWeeklyTasks = (activeMembers) => {
 
   const controls = document.createElement("div");
   controls.className = "inline";
-  const taskInput = document.createElement("input");
-  taskInput.placeholder = "New weekly task";
+
   const addTask = document.createElement("button");
   addTask.className = "secondary";
   addTask.type = "button";
   addTask.textContent = "Add task";
   addTask.addEventListener("click", () => {
-    const label = taskInput.value.trim();
-    if (!label) return;
     const id = crypto.randomUUID();
-    state.weekData.weekTasks.push({ id, label });
+    state.weekData.weekTasks.push({ id, label: "" });
     state.weekData.taskAttendance[id] = {};
     state.roster.forEach((member) => {
       state.weekData.taskAttendance[id][member.id] = false;
     });
-    taskInput.value = "";
+    pendingFocusTaskId = id;
     renderTaskRows();
   });
-  controls.append(taskInput, addTask);
+  controls.append(addTask);
 
-  section.append(heading, note, list, controls);
+  heading.append(controls);
+
+  section.append(heading, note, list);
   elements.weeklyTasks.append(section);
   renderTaskRows();
 };
