@@ -218,6 +218,8 @@ button.danger {
 .weekly-task-header {
   display: grid;
   gap: 0.4rem;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
 }
 
 .attendance-summary {
@@ -227,7 +229,7 @@ button.danger {
 .attendance-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .task-actions {
@@ -239,11 +241,20 @@ button.danger {
 .attendance-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 999px;
   background: #f1f5f9;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.attendance-toggle--all {
+  background: #e2e8f0;
+  font-weight: 600;
+}
+
+.hidden {
+  display: none;
 }
 
 .toast {
