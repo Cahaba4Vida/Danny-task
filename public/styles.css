@@ -2,7 +2,11 @@
   color-scheme: light;
   font-family: "Inter", system-ui, sans-serif;
   background: #f5f6fb;
-  color: #1d1d1f;
+  color: #0f172a;
+  --brand-navy: #0b1f33;
+  --brand-navy-strong: #102a43;
+  --brand-red: #e11d2e;
+  --brand-slate: #94a3b8;
 }
 
 * {
@@ -37,7 +41,7 @@ h2 {
 }
 
 .topbar {
-  background: #0f172a;
+  background: var(--brand-navy);
   color: #f8fafc;
   padding: 1.5rem;
   display: flex;
@@ -113,13 +117,13 @@ button {
 }
 
 button.primary {
-  background: #2563eb;
+  background: var(--brand-red);
   color: #fff;
 }
 
 button.secondary {
   background: #e2e8f0;
-  color: #0f172a;
+  color: var(--brand-navy);
 }
 
 button.secondary.active {
@@ -199,7 +203,7 @@ button.danger {
 }
 
 .muted {
-  color: #64748b;
+  color: var(--brand-slate);
   font-size: 0.9rem;
 }
 
