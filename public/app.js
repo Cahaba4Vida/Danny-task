@@ -17,6 +17,8 @@ const state = {
   },
   weeksList: [],
   membersExpanded: false,
+  rosterFilter: "",
+  memberFilter: "",
 };
 
 let sqlClient = null;
@@ -36,6 +38,7 @@ const getSql = () => {
 const elements = {
   teamSelect: document.getElementById("team-select"),
   isoWeek: document.getElementById("iso-week"),
+  rosterFilter: document.getElementById("roster-filter"),
   rosterList: document.getElementById("roster-list"),
   newMemberName: document.getElementById("new-member-name"),
   newMemberEmail: document.getElementById("new-member-email"),
@@ -43,6 +46,7 @@ const elements = {
   newMemberTeam: document.getElementById("new-member-team"),
   addMember: document.getElementById("add-member"),
   saveRoster: document.getElementById("save-roster"),
+  memberFilter: document.getElementById("member-filter"),
   membersPanel: document.getElementById("members-panel"),
   toggleMembers: document.getElementById("toggle-members"),
   weeksList: document.getElementById("weeks-list"),
@@ -142,6 +146,40 @@ const getTeamLabel = (teamId) => {
   return team?.name || teamId;
 };
 
+const TASK_CATEGORIES = [
+  { value: "general", label: "General" },
+  { value: "meeting", label: "Meeting" },
+  { value: "training", label: "Training" },
+  { value: "outreach", label: "Outreach" },
+  { value: "followup", label: "Follow-up" },
+];
+
+const getFilterText = (value) => value?.trim().toLowerCase() || "";
+
+const updateFilterVisibility = () => {
+  const showFilters = state.teamId === "all";
+  if (elements.rosterFilter) {
+    elements.rosterFilter.parentElement.classList.toggle(
+      "hidden",
+      !showFilters
+    );
+    if (!showFilters) {
+      elements.rosterFilter.value = "";
+      state.rosterFilter = "";
+    }
+  }
+  if (elements.memberFilter) {
+    elements.memberFilter.parentElement.classList.toggle(
+      "hidden",
+      !showFilters
+    );
+    if (!showFilters) {
+      elements.memberFilter.value = "";
+      state.memberFilter = "";
+    }
+  }
+};
+
 const loadTeams = async () => {
   const sql = getSql();
   const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
@@ -203,7 +241,7 @@ const loadWeek = async () => {
     WHERE week_id = ${weekId}
   `;
   const taskRows = await sql`
-    SELECT id, label, created_at, updated_at
+    SELECT id, label, category, notes, created_at, updated_at
     FROM weekly_tasks
     WHERE week_id = ${weekId}
     ORDER BY created_at ASC
@@ -236,6 +274,8 @@ const loadWeek = async () => {
   const weekTasks = taskRows.map((row) => ({
     id: row.id,
     label: row.label,
+    category: row.category || "general",
+    notes: row.notes || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -295,13 +335,21 @@ const loadWeeksList = async () => {
 
 const renderRoster = () => {
   elements.rosterList.innerHTML = "";
-  if (state.roster.length === 0) {
+  const filterText =
+    state.teamId === "all" ? getFilterText(state.rosterFilter) : "";
+  const visibleRoster =
+    state.teamId === "all" && filterText
+      ? state.roster.filter((member) =>
+          member.name?.toLowerCase().includes(filterText)
+        )
+      : state.roster;
+  if (visibleRoster.length === 0) {
     elements.rosterList.textContent = "No members yet.";
     return;
   }
   const assignableTeams = state.teams.filter((team) => team.id !== "all");
 
-  state.roster.forEach((member) => {
+  visibleRoster.forEach((member) => {
     const row = document.createElement("div");
     row.className = "roster-row";
 
@@ -556,6 +604,31 @@ const renderWeeklyTasks = (activeMembers) => {
 
       header.append(labelInput, summary, checkAllLabel);
 
+      const metaRow = document.createElement("div");
+      metaRow.className = "task-meta";
+
+      const categorySelect = document.createElement("select");
+      TASK_CATEGORIES.forEach((category) => {
+        const option = document.createElement("option");
+        option.value = category.value;
+        option.textContent = category.label;
+        categorySelect.append(option);
+      });
+      categorySelect.value = task.category || "general";
+      categorySelect.addEventListener("change", (event) => {
+        task.category = event.target.value;
+      });
+
+      const notesInput = document.createElement("input");
+      notesInput.type = "text";
+      notesInput.placeholder = "Task notes (optional)";
+      notesInput.value = task.notes || "";
+      notesInput.addEventListener("input", (event) => {
+        task.notes = event.target.value;
+      });
+
+      metaRow.append(categorySelect, notesInput);
+
       const attendanceList = document.createElement("div");
       attendanceList.className = "attendance-list";
 
@@ -615,7 +688,7 @@ const renderWeeklyTasks = (activeMembers) => {
 
       updateSummary();
       updateCheckAll();
-      row.append(header, attendanceList, actions);
+      row.append(header, metaRow, attendanceList, actions);
       list.append(row);
     });
   };
@@ -629,7 +702,12 @@ const renderWeeklyTasks = (activeMembers) => {
   addTask.textContent = "Add task";
   addTask.addEventListener("click", () => {
     const id = crypto.randomUUID();
-    state.weekData.weekTasks.push({ id, label: "" });
+    state.weekData.weekTasks.push({
+      id,
+      label: "",
+      category: "general",
+      notes: "",
+    });
     state.weekData.taskAttendance[id] = {};
     state.roster.forEach((member) => {
       state.weekData.taskAttendance[id][member.id] = false;
@@ -649,7 +727,15 @@ const renderWeeklyTasks = (activeMembers) => {
 const renderMembers = () => {
   elements.membersPanel.innerHTML = "";
   const activeMembers = state.roster.filter((member) => member.active);
-  renderWeeklyTasks(activeMembers);
+  const memberFilterText =
+    state.teamId === "all" ? getFilterText(state.memberFilter) : "";
+  const visibleMembers =
+    state.teamId === "all" && memberFilterText
+      ? activeMembers.filter((member) =>
+          member.name?.toLowerCase().includes(memberFilterText)
+        )
+      : activeMembers;
+  renderWeeklyTasks(visibleMembers);
   if (elements.toggleMembers) {
     elements.toggleMembers.textContent = state.membersExpanded
       ? "Hide individuals"
@@ -660,11 +746,11 @@ const renderMembers = () => {
     return;
   }
   elements.membersPanel.classList.remove("hidden");
-  if (activeMembers.length === 0) {
+  if (visibleMembers.length === 0) {
     elements.membersPanel.textContent = "No active members yet.";
     return;
   }
-  activeMembers.forEach((member) => {
+  visibleMembers.forEach((member) => {
     elements.membersPanel.append(renderMemberCard(member));
   });
 };
@@ -735,7 +821,7 @@ const exportHistory = async (query, label) => {
     });
 
     const taskRows = await sql`
-      SELECT id, label
+      SELECT id, label, category, notes
       FROM weekly_tasks
       WHERE week_id = ${week.id}
       ORDER BY created_at ASC
@@ -779,6 +865,8 @@ const exportHistory = async (query, label) => {
       weekTasks: taskRows.map((row) => ({
         id: row.id,
         label: row.label,
+        category: row.category || "general",
+        notes: row.notes || "",
         attendance: taskAttendance[row.id] || {},
       })),
       members: Array.from(memberMap.values()),
@@ -880,10 +968,21 @@ const saveWeek = async () => {
   for (const task of state.weekData.weekTasks) {
     if (!task.id || !task.label?.trim()) continue;
     await sql`
-      INSERT INTO weekly_tasks (id, week_id, label, updated_at)
-      VALUES (${task.id}, ${weekId}, ${task.label.trim()}, NOW())
+      INSERT INTO weekly_tasks (id, week_id, label, category, notes, updated_at)
+      VALUES (
+        ${task.id},
+        ${weekId},
+        ${task.label.trim()},
+        ${task.category || "general"},
+        ${task.notes || ""},
+        NOW()
+      )
       ON CONFLICT (id)
-      DO UPDATE SET label = EXCLUDED.label, updated_at = NOW()
+      DO UPDATE SET
+        label = EXCLUDED.label,
+        category = EXCLUDED.category,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
     `;
   }
 
@@ -937,6 +1036,13 @@ const initialize = async () => {
   await loadWeek();
   await loadWeeksList();
 
+  updateFilterVisibility();
+  if (elements.rosterFilter) {
+    elements.rosterFilter.value = state.rosterFilter;
+  }
+  if (elements.memberFilter) {
+    elements.memberFilter.value = state.memberFilter;
+  }
   renderRoster();
   renderMembers();
   renderWeeksList();
@@ -959,6 +1065,7 @@ elements.teamSelect.addEventListener("change", async (event) => {
   await loadRoster();
   await loadWeek();
   await loadWeeksList();
+  updateFilterVisibility();
   renderRoster();
   renderMembers();
   renderWeeksList();
@@ -1017,6 +1124,16 @@ elements.actorSelect.addEventListener("change", (event) => {
 
 elements.toggleMembers.addEventListener("click", () => {
   state.membersExpanded = !state.membersExpanded;
+  renderMembers();
+});
+
+elements.rosterFilter.addEventListener("input", (event) => {
+  state.rosterFilter = event.target.value;
+  renderRoster();
+});
+
+elements.memberFilter.addEventListener("input", (event) => {
+  state.memberFilter = event.target.value;
   renderMembers();
 });
 
