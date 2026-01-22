@@ -3,13 +3,7 @@ const path = require("path");
 const { jsonResponse, requireAdmin } = require("./lib/auth");
 const { withTransaction } = require("./lib/db");
 
-const migrationPath = path.resolve(
-  __dirname,
-  "..",
-  "..",
-  "migrations",
-  "001_init.sql"
-);
+const migrationDir = path.resolve(__dirname, "..", "..", "migrations");
 
 exports.handler = async (event) => {
   const authError = requireAdmin(event);
@@ -20,9 +14,15 @@ exports.handler = async (event) => {
   }
 
   try {
-    const sql = fs.readFileSync(migrationPath, "utf8");
     await withTransaction(async (client) => {
-      await client.query(sql);
+      const migrations = fs
+        .readdirSync(migrationDir)
+        .filter((file) => file.endsWith(".sql"))
+        .sort();
+      for (const migration of migrations) {
+        const sql = fs.readFileSync(path.join(migrationDir, migration), "utf8");
+        await client.query(sql);
+      }
     });
 
     return jsonResponse(200, { ok: true, migrated: true });
