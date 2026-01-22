@@ -1,5 +1,9 @@
+import { neon, neonConfig } from "https://esm.sh/@neondatabase/serverless";
+
+neonConfig.fetchConnectionCache = true;
+
 const state = {
-  token: localStorage.getItem("fitHubToken"),
+  databaseUrl: localStorage.getItem("fitHubDatabaseUrl"),
   actor: localStorage.getItem("fitHubActor") || "Braxton",
   teamId: "braxton",
   isoWeek: "",
@@ -12,6 +16,20 @@ const state = {
     taskAttendance: {},
   },
   weeksList: [],
+};
+
+let sqlClient = null;
+let sqlClientUrl = null;
+
+const getSql = () => {
+  if (!state.databaseUrl) {
+    throw new Error("Database URL missing. Please re-enter it.");
+  }
+  if (!sqlClient || sqlClientUrl !== state.databaseUrl) {
+    sqlClient = neon(state.databaseUrl);
+    sqlClientUrl = state.databaseUrl;
+  }
+  return sqlClient;
 };
 
 const elements = {
@@ -47,31 +65,16 @@ const showToast = (message) => {
   elements.toast.dataset.timeoutId = timeoutId;
 };
 
-const apiFetch = async (path, options = {}) => {
-  const headers = new Headers(options.headers || {});
-  headers.set("x-admin-token", state.token || "");
-  headers.set("x-actor", state.actor || "Unknown");
-  if (!headers.has("Content-Type") && options.body) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetch(`/api/${path}`, {
-    ...options,
-    headers,
-  });
-
-  if (response.status === 401) {
-    alert("Invalid or missing admin token. Please re-enter.");
-    localStorage.removeItem("fitHubToken");
-    window.location.href = "/index.html";
-    return null;
-  }
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "Request failed");
-  }
-  return data;
+const ensureWeekId = async (teamId, isoWeek) => {
+  const sql = getSql();
+  const rows = await sql`
+    INSERT INTO weeks (team_id, iso_week)
+    VALUES (${teamId}, ${isoWeek})
+    ON CONFLICT (team_id, iso_week)
+    DO UPDATE SET updated_at = NOW()
+    RETURNING id
+  `;
+  return rows[0]?.id;
 };
 
 const getDenverNow = () => {
@@ -130,8 +133,9 @@ const ensureWeekTaskData = () => {
 };
 
 const loadTeams = async () => {
-  const data = await apiFetch("teams-list");
-  state.teams = data.teams || [];
+  const sql = getSql();
+  const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
+  state.teams = rows || [];
   elements.teamSelect.innerHTML = "";
   state.teams.forEach((team) => {
     const option = document.createElement("option");
@@ -142,30 +146,118 @@ const loadTeams = async () => {
 };
 
 const loadRoster = async () => {
-  const data = await apiFetch(`roster-get?teamId=${state.teamId}`);
-  state.roster = data.members || [];
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, name, active, email, phone
+    FROM members
+    WHERE team_id = ${state.teamId}
+    ORDER BY created_at ASC
+  `;
+  state.roster = rows || [];
 };
 
 const loadWeek = async () => {
-  const data = await apiFetch(
-    `week-get?teamId=${state.teamId}&isoWeek=${state.isoWeek}`
-  );
+  const sql = getSql();
+  const weekId = await ensureWeekId(state.teamId, state.isoWeek);
+  const members = await sql`
+    SELECT id, name, active, email, phone
+    FROM members
+    WHERE team_id = ${state.teamId}
+    ORDER BY created_at ASC
+  `;
+  const stateRows = await sql`
+    SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes, updated_at
+    FROM member_week_state
+    WHERE week_id = ${weekId}
+  `;
+  const taskRows = await sql`
+    SELECT id, label, created_at, updated_at
+    FROM weekly_tasks
+    WHERE week_id = ${weekId}
+    ORDER BY created_at ASC
+  `;
+  const attendanceRows = await sql`
+    SELECT task_id, member_id, attended, updated_at
+    FROM task_attendance
+    WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = ${weekId})
+  `;
+  const roleplayRows = await sql`
+    SELECT id, member_id, type, note, timestamp, created_at
+    FROM roleplays
+    WHERE week_id = ${weekId}
+    ORDER BY timestamp ASC
+  `;
+
+  const states = {};
+  stateRows.forEach((row) => {
+    states[row.member_id] = {
+      weeklyFocusSet: row.weekly_focus_set,
+      roleplayDone: row.roleplay_done,
+      firstMeetings: row.first_meetings,
+      signedRecruits: row.signed_recruits,
+      notes: row.notes || "",
+      updatedAt: row.updated_at,
+    };
+  });
+
+  const weekTasks = taskRows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+
+  const taskAttendance = {};
+  attendanceRows.forEach((row) => {
+    if (!taskAttendance[row.task_id]) {
+      taskAttendance[row.task_id] = {};
+    }
+    taskAttendance[row.task_id][row.member_id] = row.attended;
+  });
+
+  const roleplays = {};
+  roleplayRows.forEach((row) => {
+    if (!roleplays[row.member_id]) roleplays[row.member_id] = [];
+    roleplays[row.member_id].push({
+      id: row.id,
+      type: row.type,
+      note: row.note,
+      timestamp: row.timestamp,
+      createdAt: row.created_at,
+    });
+  });
+
+  (members || []).forEach((member) => {
+    if (!states[member.id]) {
+      states[member.id] = buildDefaultState();
+    }
+    if (!roleplays[member.id]) {
+      roleplays[member.id] = [];
+    }
+  });
+
   state.weekData = {
-    states: data.states || {},
-    roleplays: data.roleplays || {},
-    weekTasks: data.weekTasks || [],
-    taskAttendance: data.taskAttendance || {},
+    states,
+    roleplays,
+    weekTasks,
+    taskAttendance,
   };
-  if (Array.isArray(data.members)) {
-    state.roster = data.members;
+  if (Array.isArray(members)) {
+    state.roster = members;
   }
   state.roster.forEach((member) => ensureMemberData(member.id));
   ensureWeekTaskData();
 };
 
 const loadWeeksList = async () => {
-  const data = await apiFetch(`weeks-list?teamId=${state.teamId}`);
-  state.weeksList = data.weeks || [];
+  const sql = getSql();
+  const rows = await sql`
+    SELECT iso_week
+    FROM weeks
+    WHERE team_id = ${state.teamId}
+    ORDER BY iso_week DESC
+  `;
+  state.weeksList = (rows || []).map((row) => row.iso_week);
 };
 
 const renderRoster = () => {
@@ -323,7 +415,8 @@ const renderMemberCard = (member) => {
 
   const renderRoleplays = () => {
     roleplayList.innerHTML = "";
-    roleplays.forEach((entry) => {
+    const currentRoleplays = state.weekData.roleplays[member.id] || [];
+    currentRoleplays.forEach((entry) => {
       const row = document.createElement("div");
       row.className = "roleplay-item";
       const type = document.createElement("input");
@@ -343,7 +436,7 @@ const renderMemberCard = (member) => {
       remove.className = "danger";
       remove.textContent = "Remove";
       remove.addEventListener("click", () => {
-        state.weekData.roleplays[member.id] = roleplays.filter(
+        state.weekData.roleplays[member.id] = currentRoleplays.filter(
           (r) => r.id !== entry.id
         );
         renderRoleplays();
@@ -364,7 +457,7 @@ const renderMemberCard = (member) => {
   addRoleplay.textContent = "Add";
   addRoleplay.addEventListener("click", () => {
     if (!roleplayType.value.trim()) return;
-    roleplays.push({
+    state.weekData.roleplays[member.id].push({
       id: crypto.randomUUID(),
       type: roleplayType.value.trim(),
       note: roleplayNote.value.trim(),
@@ -587,8 +680,120 @@ const renderMembers = () => {
 
 const exportHistory = async (query, label) => {
   elements.exportStatus.textContent = "Preparing export...";
-  const data = await apiFetch(`history-export?${query}`);
-  const json = JSON.stringify(data, null, 2);
+  const sql = getSql();
+  const params = new URLSearchParams(query);
+  const allTeams = params.get("allTeams") === "1";
+  const teamId = params.get("teamId");
+  if (!teamId && !allTeams) {
+    throw new Error("teamId or allTeams=1 is required");
+  }
+
+  const weekRows = allTeams
+    ? await sql`
+        SELECT id, team_id, iso_week
+        FROM weeks
+        ORDER BY team_id ASC, iso_week ASC
+      `
+    : await sql`
+        SELECT id, team_id, iso_week
+        FROM weeks
+        WHERE team_id = ${teamId}
+        ORDER BY iso_week ASC
+      `;
+
+  const history = [];
+
+  for (const week of weekRows) {
+    const members = await sql`
+      SELECT id, name, active, email, phone
+      FROM members
+      WHERE team_id = ${week.team_id}
+      ORDER BY created_at ASC
+    `;
+
+    const memberMap = new Map();
+    members.forEach((member) => {
+      memberMap.set(member.id, {
+        memberId: member.id,
+        name: member.name,
+        active: member.active,
+        email: member.email,
+        phone: member.phone,
+        state: buildDefaultState(),
+        roleplays: [],
+      });
+    });
+
+    const stateRows = await sql`
+      SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes
+      FROM member_week_state
+      WHERE week_id = ${week.id}
+    `;
+
+    stateRows.forEach((row) => {
+      const entry = memberMap.get(row.member_id);
+      if (!entry) return;
+      entry.state = {
+        weeklyFocusSet: row.weekly_focus_set,
+        roleplayDone: row.roleplay_done,
+        firstMeetings: row.first_meetings,
+        signedRecruits: row.signed_recruits,
+        notes: row.notes || "",
+      };
+    });
+
+    const taskRows = await sql`
+      SELECT id, label
+      FROM weekly_tasks
+      WHERE week_id = ${week.id}
+      ORDER BY created_at ASC
+    `;
+
+    const attendanceRows = await sql`
+      SELECT task_id, member_id, attended
+      FROM task_attendance
+      WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = ${week.id})
+    `;
+
+    const taskAttendance = {};
+    attendanceRows.forEach((row) => {
+      if (!taskAttendance[row.task_id]) {
+        taskAttendance[row.task_id] = {};
+      }
+      taskAttendance[row.task_id][row.member_id] = row.attended;
+    });
+
+    const roleplayRows = await sql`
+      SELECT id, member_id, type, note, timestamp
+      FROM roleplays
+      WHERE week_id = ${week.id}
+      ORDER BY timestamp ASC
+    `;
+
+    roleplayRows.forEach((row) => {
+      const entry = memberMap.get(row.member_id);
+      if (!entry) return;
+      entry.roleplays.push({
+        id: row.id,
+        type: row.type,
+        note: row.note,
+        timestamp: row.timestamp,
+      });
+    });
+
+    history.push({
+      teamId: week.team_id,
+      isoWeek: week.iso_week,
+      weekTasks: taskRows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        attendance: taskAttendance[row.id] || {},
+      })),
+      members: Array.from(memberMap.values()),
+    });
+  }
+
+  const json = JSON.stringify(history, null, 2);
   await navigator.clipboard.writeText(json);
   const prompt = `${label} copied. Analyze weekly trends and highlight wins, risks, and coaching actions.`;
   const urlPrompt = encodeURIComponent(prompt);
@@ -598,47 +803,118 @@ const exportHistory = async (query, label) => {
 };
 
 const saveRoster = async () => {
+  const sql = getSql();
   for (const member of state.roster) {
-    await apiFetch("roster-update", {
-      method: "PUT",
-      body: JSON.stringify({
-        memberId: member.id,
-        name: member.name,
-        active: member.active,
-        email: member.email,
-        phone: member.phone,
-      }),
-    });
+    const name = member.name?.trim() || "";
+    const email = member.email?.trim() || null;
+    const phone = member.phone?.trim() || null;
+    await sql`
+      UPDATE members
+      SET name = ${name},
+          active = ${Boolean(member.active)},
+          email = ${email},
+          phone = ${phone},
+          updated_at = NOW()
+      WHERE id = ${member.id}
+    `;
   }
 };
 
 const saveWeek = async () => {
   elements.weekStatus.textContent = "Saving...";
-  let tasksSaved = false;
+  const sql = getSql();
+  const weekId = await ensureWeekId(state.teamId, state.isoWeek);
+
   for (const member of state.roster) {
     ensureMemberData(member.id);
-    const payload = {
-      memberId: member.id,
-      state: state.weekData.states[member.id],
-      roleplays: state.weekData.roleplays[member.id],
-    };
-    if (!tasksSaved) {
-      payload.weekTasks = state.weekData.weekTasks;
-      payload.taskAttendance = state.weekData.taskAttendance;
-      tasksSaved = true;
+    const memberState = state.weekData.states[member.id];
+    await sql`
+      INSERT INTO member_week_state
+        (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes, updated_at)
+      VALUES (
+        ${weekId},
+        ${member.id},
+        ${Boolean(memberState.weeklyFocusSet)},
+        ${Boolean(memberState.roleplayDone)},
+        ${Number(memberState.firstMeetings) || 0},
+        ${Number(memberState.signedRecruits) || 0},
+        ${memberState.notes || ""},
+        NOW()
+      )
+      ON CONFLICT (week_id, member_id)
+      DO UPDATE SET
+        weekly_focus_set = EXCLUDED.weekly_focus_set,
+        roleplay_done = EXCLUDED.roleplay_done,
+        first_meetings = EXCLUDED.first_meetings,
+        signed_recruits = EXCLUDED.signed_recruits,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `;
+
+    const roleplays = state.weekData.roleplays[member.id] || [];
+    await sql`
+      DELETE FROM roleplays
+      WHERE week_id = ${weekId} AND member_id = ${member.id}
+    `;
+    for (const entry of roleplays) {
+      if (!entry.id || !entry.type?.trim()) continue;
+      await sql`
+        INSERT INTO roleplays (id, week_id, member_id, type, note, timestamp, created_at)
+        VALUES (
+          ${entry.id},
+          ${weekId},
+          ${member.id},
+          ${entry.type.trim()},
+          ${entry.note?.trim() || null},
+          ${entry.timestamp ? new Date(entry.timestamp) : new Date()},
+          NOW()
+        )
+        ON CONFLICT (id)
+        DO UPDATE SET type = EXCLUDED.type, note = EXCLUDED.note, timestamp = EXCLUDED.timestamp
+      `;
     }
-    await apiFetch(`week-patch?teamId=${state.teamId}&isoWeek=${state.isoWeek}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
   }
+
+  await sql`
+    DELETE FROM task_attendance
+    WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = ${weekId})
+  `;
+  await sql`DELETE FROM weekly_tasks WHERE week_id = ${weekId}`;
+
+  for (const task of state.weekData.weekTasks) {
+    if (!task.id || !task.label?.trim()) continue;
+    await sql`
+      INSERT INTO weekly_tasks (id, week_id, label, updated_at)
+      VALUES (${task.id}, ${weekId}, ${task.label.trim()}, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET label = EXCLUDED.label, updated_at = NOW()
+    `;
+  }
+
+  if (state.weekData.taskAttendance) {
+    for (const [taskId, attendanceMap] of Object.entries(
+      state.weekData.taskAttendance
+    )) {
+      if (!taskId) continue;
+      for (const [memberId, attended] of Object.entries(attendanceMap || {})) {
+        if (!memberId) continue;
+        await sql`
+          INSERT INTO task_attendance (task_id, member_id, attended, updated_at)
+          VALUES (${taskId}, ${memberId}, ${Boolean(attended)}, NOW())
+          ON CONFLICT (task_id, member_id)
+          DO UPDATE SET attended = EXCLUDED.attended, updated_at = NOW()
+        `;
+      }
+    }
+  }
+
   elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
   await loadWeeksList();
   renderWeeksList();
 };
 
 const initialize = async () => {
-  if (!state.token) {
+  if (!state.databaseUrl) {
     window.location.href = "/index.html";
     return;
   }
@@ -663,7 +939,7 @@ const initialize = async () => {
   renderWeeksList();
 };
 
-if (!state.token) {
+if (!state.databaseUrl) {
   window.location.href = "/index.html";
 }
 
@@ -684,18 +960,16 @@ elements.addMember.addEventListener("click", async () => {
   if (!name) return;
   const email = elements.newMemberEmail.value.trim();
   const phone = elements.newMemberPhone.value.trim();
-  const data = await apiFetch(`roster-save?teamId=${state.teamId}`, {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      email,
-      phone,
-      active: true,
-    }),
-  });
-  if (data?.member) {
-    state.roster.push(data.member);
-    ensureMemberData(data.member.id);
+  const sql = getSql();
+  const rows = await sql`
+    INSERT INTO members (team_id, name, active, email, phone)
+    VALUES (${state.teamId}, ${name}, true, ${email || null}, ${phone || null})
+    RETURNING id, name, active, email, phone
+  `;
+  const member = rows[0];
+  if (member) {
+    state.roster.push(member);
+    ensureMemberData(member.id);
   }
   elements.newMemberName.value = "";
   elements.newMemberEmail.value = "";
@@ -722,7 +996,7 @@ elements.exportAll.addEventListener("click", async () => {
 });
 
 elements.clearToken.addEventListener("click", () => {
-  localStorage.removeItem("fitHubToken");
+  localStorage.removeItem("fitHubDatabaseUrl");
   window.location.href = "/index.html";
 });
 
