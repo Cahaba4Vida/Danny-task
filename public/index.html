@@ -14,10 +14,14 @@
   <body class="page">
     <main class="card">
       <h1>Fit Hub</h1>
-      <p class="muted">Enter the shared admin token to access the leader dashboard.</p>
+      <p class="muted">Enter the database connection string to access the leader dashboard.</p>
       <label class="field">
-        <span>Admin Token</span>
-        <input id="token-input" type="password" placeholder="x-admin-token" />
+        <span>Database URL</span>
+        <input
+          id="token-input"
+          type="password"
+          placeholder="postgres://user:pass@host/db"
+        />
       </label>
       <label class="field">
         <span>Actor</span>
@@ -41,7 +45,7 @@
       const enterButton = document.getElementById("enter-button");
       const error = document.getElementById("error");
 
-      const existingToken = localStorage.getItem("fitHubToken");
+      const existingToken = localStorage.getItem("fitHubDatabaseUrl");
       const existingActor = localStorage.getItem("fitHubActor");
 
       if (existingToken) {
@@ -57,11 +61,11 @@
         const actor = actorSelect.value;
 
         if (!token) {
-          error.textContent = "Token is required.";
+          error.textContent = "Database URL is required.";
           return;
         }
 
-        localStorage.setItem("fitHubToken", token);
+        localStorage.setItem("fitHubDatabaseUrl", token);
         localStorage.setItem("fitHubActor", actor);
         window.location.href = "/app.html";
       });
