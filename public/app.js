@@ -136,6 +136,12 @@ const ensureWeekTaskData = () => {
   });
 };
 
+const getTeamLabel = (teamId) => {
+  if (!teamId) return "";
+  const team = state.teams.find((entry) => entry.id === teamId);
+  return team?.name || teamId;
+};
+
 const loadTeams = async () => {
   const sql = getSql();
   const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
@@ -164,7 +170,7 @@ const loadRoster = async () => {
       ? await sql`
           SELECT id, name, active, email, phone, team_id
           FROM members
-          ORDER BY created_at ASC
+          ORDER BY team_id ASC, created_at ASC
         `
       : await sql`
           SELECT id, name, active, email, phone, team_id
@@ -183,7 +189,7 @@ const loadWeek = async () => {
       ? await sql`
           SELECT id, name, active, email, phone, team_id
           FROM members
-          ORDER BY created_at ASC
+          ORDER BY team_id ASC, created_at ASC
         `
       : await sql`
           SELECT id, name, active, email, phone, team_id
@@ -382,6 +388,12 @@ const renderMemberCard = (member) => {
 
   const title = document.createElement("h3");
   title.textContent = member.name;
+  if (state.teamId === "all" && member.team_id) {
+    const teamChip = document.createElement("span");
+    teamChip.className = "team-chip";
+    teamChip.textContent = getTeamLabel(member.team_id);
+    title.append(teamChip);
+  }
 
   const counters = document.createElement("div");
   counters.className = "stack";
@@ -572,7 +584,14 @@ const renderWeeklyTasks = (activeMembers) => {
           });
           const name = document.createElement("span");
           name.textContent = member.name;
-          toggle.append(checkbox, name);
+          if (state.teamId === "all" && member.team_id) {
+            const teamChip = document.createElement("span");
+            teamChip.className = "team-chip";
+            teamChip.textContent = getTeamLabel(member.team_id);
+            toggle.append(checkbox, name, teamChip);
+          } else {
+            toggle.append(checkbox, name);
+          }
           attendanceList.append(toggle);
         });
       }

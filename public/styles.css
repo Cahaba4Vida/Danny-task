@@ -248,6 +248,18 @@ button.danger {
   font-size: 0.8rem;
 }
 
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+  margin-left: 0.35rem;
+}
+
 .attendance-toggle--all {
   background: #e2e8f0;
   font-weight: 600;
