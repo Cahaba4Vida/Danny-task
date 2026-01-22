@@ -1,12 +1,5 @@
 const { jsonResponse, requireAdmin } = require("./lib/auth");
-const { readJson, writeJson } = require("./lib/blobStore");
-
-const buildDefaultRoster = (teamId) => ({
-  schemaVersion: 1,
-  teamId,
-  updatedAt: new Date().toISOString(),
-  members: [],
-});
+const { withClient } = require("./lib/db");
 
 exports.handler = async (event) => {
   const authError = requireAdmin(event);
@@ -17,13 +10,20 @@ exports.handler = async (event) => {
     return jsonResponse(400, { ok: false, error: "teamId is required" });
   }
 
-  const key = `roster/${teamId}.json`;
-  let roster = await readJson(key);
+  try {
+    const members = await withClient(async (client) => {
+      const { rows } = await client.query(
+        `SELECT id, name, active, email, phone
+         FROM members
+         WHERE team_id = $1
+         ORDER BY created_at ASC`,
+        [teamId]
+      );
+      return rows;
+    });
 
-  if (!roster) {
-    roster = buildDefaultRoster(teamId);
-    await writeJson(key, roster);
+    return jsonResponse(200, { ok: true, teamId, members });
+  } catch (error) {
+    return jsonResponse(500, { ok: false, error: error.message });
   }
-
-  return jsonResponse(200, roster);
 };

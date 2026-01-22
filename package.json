@@ -4,6 +4,6 @@
   "description": "Fit Hub leader dashboard",
   "private": true,
   "dependencies": {
-    "@netlify/blobs": "^6.1.0"
+    "pg": "^8.13.1"
   }
 }

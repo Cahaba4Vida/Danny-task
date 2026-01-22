@@ -1,66 +1,175 @@
-const { randomUUID } = require("crypto");
-const { getHeader, jsonResponse, requireAdmin } = require("./lib/auth");
-const { readJson } = require("./lib/blobStore");
-const {
-  appendAuditEvent,
-  buildDefaultWeek,
-  buildEmptyMemberState,
-  ensureWeekIndex,
-  mergeMemberPatch,
-  readWeek,
-  writeWeek,
-} = require("./lib/weekHelpers");
+const { jsonResponse, requireAdmin, getHeader } = require("./lib/auth");
+const { parseJsonBody } = require("./lib/request");
+const { withTransaction } = require("./lib/db");
+
+const normalizeState = (state = {}) => ({
+  weeklyFocusSet: Boolean(state.weeklyFocusSet),
+  roleplayDone: Boolean(state.roleplayDone),
+  firstMeetings: Number.isFinite(state.firstMeetings)
+    ? state.firstMeetings
+    : Number(state.firstMeetings) || 0,
+  signedRecruits: Number.isFinite(state.signedRecruits)
+    ? state.signedRecruits
+    : Number(state.signedRecruits) || 0,
+  notes: state.notes ? String(state.notes) : "",
+});
 
 exports.handler = async (event) => {
   const authError = requireAdmin(event);
   if (authError) return authError;
 
+  if (event.httpMethod !== "PATCH") {
+    return jsonResponse(405, { ok: false, error: "Method not allowed" });
+  }
+
   const teamId = event.queryStringParameters?.teamId;
   const isoWeek = event.queryStringParameters?.isoWeek;
   if (!teamId || !isoWeek) {
-    return jsonResponse(400, { ok: false, error: "teamId and isoWeek are required" });
+    return jsonResponse(400, {
+      ok: false,
+      error: "teamId and isoWeek are required",
+    });
   }
 
-  let payload;
-  try {
-    payload = JSON.parse(event.body || "{}");
-  } catch (error) {
-    return jsonResponse(400, { ok: false, error: "Invalid JSON payload" });
+  const body = parseJsonBody(event) || {};
+  const memberId = body.memberId;
+  if (!memberId) {
+    return jsonResponse(400, { ok: false, error: "memberId is required" });
   }
-
-  let week = await readWeek(teamId, isoWeek);
-  if (!week) {
-    const roster = await readJson(`roster/${teamId}.json`);
-    week = buildDefaultWeek(teamId, isoWeek, roster);
-  }
-
-  const patchMembers = payload.members || {};
-  const updatedMembers = { ...week.members };
-
-  Object.entries(patchMembers).forEach(([memberId, memberPatch]) => {
-    const current = updatedMembers[memberId] || buildEmptyMemberState();
-    updatedMembers[memberId] = mergeMemberPatch(current, memberPatch || {});
-  });
-
-  week = {
-    ...week,
-    members: updatedMembers,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await writeWeek(teamId, isoWeek, week);
-  await ensureWeekIndex(teamId, isoWeek);
 
   const actor = getHeader(event.headers, "x-actor") || "Unknown";
-  const summary = payload.summary || "Updated week data";
+  const state = normalizeState(body.state);
+  const tasks = Array.isArray(body.tasks) ? body.tasks : null;
+  const roleplays = Array.isArray(body.roleplays) ? body.roleplays : null;
 
-  await appendAuditEvent(teamId, isoWeek, {
-    id: randomUUID(),
-    timestamp: new Date().toISOString(),
-    actor,
-    action: "week-patch",
-    summary,
-  });
+  try {
+    const result = await withTransaction(async (client) => {
+      const weekResult = await client.query(
+        `INSERT INTO weeks (team_id, iso_week)
+         VALUES ($1, $2)
+         ON CONFLICT (team_id, iso_week)
+         DO UPDATE SET updated_at = NOW()
+         RETURNING id`,
+        [teamId, isoWeek]
+      );
+      const weekId = weekResult.rows[0].id;
 
-  return jsonResponse(200, week);
+      await client.query(
+        `INSERT INTO member_week_state
+          (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (week_id, member_id)
+         DO UPDATE SET
+           weekly_focus_set = EXCLUDED.weekly_focus_set,
+           roleplay_done = EXCLUDED.roleplay_done,
+           first_meetings = EXCLUDED.first_meetings,
+           signed_recruits = EXCLUDED.signed_recruits,
+           notes = EXCLUDED.notes,
+           updated_at = NOW()`,
+        [
+          weekId,
+          memberId,
+          state.weeklyFocusSet,
+          state.roleplayDone,
+          state.firstMeetings,
+          state.signedRecruits,
+          state.notes,
+        ]
+      );
+
+      if (tasks) {
+        const taskIds = tasks.map((task) => task.id).filter(Boolean);
+        if (taskIds.length > 0) {
+          await client.query(
+            `DELETE FROM custom_tasks
+             WHERE week_id = $1 AND member_id = $2 AND id <> ALL($3::uuid[])`,
+            [weekId, memberId, taskIds]
+          );
+        } else {
+          await client.query(
+            "DELETE FROM custom_tasks WHERE week_id = $1 AND member_id = $2",
+            [weekId, memberId]
+          );
+        }
+
+        for (const task of tasks) {
+          if (!task.id || !task.label?.trim()) continue;
+          await client.query(
+            `INSERT INTO custom_tasks (id, week_id, member_id, label, done, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (id)
+             DO UPDATE SET label = EXCLUDED.label, done = EXCLUDED.done, updated_at = NOW()`,
+            [
+              task.id,
+              weekId,
+              memberId,
+              task.label.trim(),
+              Boolean(task.done),
+            ]
+          );
+        }
+      }
+
+      if (roleplays) {
+        const roleplayIds = roleplays.map((entry) => entry.id).filter(Boolean);
+        if (roleplayIds.length > 0) {
+          await client.query(
+            `DELETE FROM roleplays
+             WHERE week_id = $1 AND member_id = $2 AND id <> ALL($3::uuid[])`,
+            [weekId, memberId, roleplayIds]
+          );
+        } else {
+          await client.query(
+            "DELETE FROM roleplays WHERE week_id = $1 AND member_id = $2",
+            [weekId, memberId]
+          );
+        }
+
+        for (const entry of roleplays) {
+          if (!entry.id || !entry.type?.trim()) continue;
+          await client.query(
+            `INSERT INTO roleplays (id, week_id, member_id, type, note, timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (id)
+             DO UPDATE SET type = EXCLUDED.type, note = EXCLUDED.note, timestamp = EXCLUDED.timestamp`,
+            [
+              entry.id,
+              weekId,
+              memberId,
+              entry.type.trim(),
+              entry.note?.trim() || null,
+              entry.timestamp ? new Date(entry.timestamp) : new Date(),
+            ]
+          );
+        }
+      }
+
+      await client.query("UPDATE weeks SET updated_at = NOW() WHERE id = $1", [
+        weekId,
+      ]);
+
+      await client.query(
+        `INSERT INTO audit_events (team_id, iso_week, actor, action, payload)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          teamId,
+          isoWeek,
+          actor,
+          "week_patch",
+          {
+            memberId,
+            state,
+            tasksCount: tasks ? tasks.length : null,
+            roleplaysCount: roleplays ? roleplays.length : null,
+          },
+        ]
+      );
+
+      return { ok: true };
+    });
+
+    return jsonResponse(200, result);
+  } catch (error) {
+    return jsonResponse(500, { ok: false, error: error.message });
+  }
 };

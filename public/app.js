@@ -3,8 +3,13 @@ const state = {
   actor: localStorage.getItem("fitHubActor") || "Braxton",
   teamId: "braxton",
   isoWeek: "",
-  roster: null,
-  week: null,
+  teams: [],
+  roster: [],
+  weekData: {
+    states: {},
+    tasks: {},
+    roleplays: {},
+  },
   weeksList: [],
 };
 
@@ -13,6 +18,8 @@ const elements = {
   isoWeek: document.getElementById("iso-week"),
   rosterList: document.getElementById("roster-list"),
   newMemberName: document.getElementById("new-member-name"),
+  newMemberEmail: document.getElementById("new-member-email"),
+  newMemberPhone: document.getElementById("new-member-phone"),
   addMember: document.getElementById("add-member"),
   saveRoster: document.getElementById("save-roster"),
   membersPanel: document.getElementById("members-panel"),
@@ -24,12 +31,27 @@ const elements = {
   exportStatus: document.getElementById("export-status"),
   clearToken: document.getElementById("clear-token"),
   actorSelect: document.getElementById("actor-select"),
+  toast: document.getElementById("toast"),
+};
+
+const showToast = (message) => {
+  if (!elements.toast) return;
+  elements.toast.textContent = message;
+  elements.toast.classList.add("show");
+  window.clearTimeout(elements.toast.dataset.timeoutId);
+  const timeoutId = window.setTimeout(() => {
+    elements.toast.classList.remove("show");
+  }, 3000);
+  elements.toast.dataset.timeoutId = timeoutId;
 };
 
 const apiFetch = async (path, options = {}) => {
   const headers = new Headers(options.headers || {});
   headers.set("x-admin-token", state.token || "");
   headers.set("x-actor", state.actor || "Unknown");
+  if (!headers.has("Content-Type") && options.body) {
+    headers.set("Content-Type", "application/json");
+  }
 
   const response = await fetch(`/api/${path}`, {
     ...options,
@@ -69,52 +91,56 @@ const getIsoWeekString = (date) => {
   return `${target.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
 };
 
-const buildEmptyMemberState = () => ({
-  checklist: { weeklyFocusSet: false, roleplayDone: false },
-  counters: { firstMeetings: 0, signedRecruits: 0 },
-  customTasks: [],
-  roleplays: [],
+const buildDefaultState = () => ({
+  weeklyFocusSet: false,
+  roleplayDone: false,
+  firstMeetings: 0,
+  signedRecruits: 0,
   notes: "",
 });
 
-const ensureMemberState = (memberId) => {
-  if (!state.week.members[memberId]) {
-    state.week.members[memberId] = buildEmptyMemberState();
+const ensureMemberData = (memberId) => {
+  if (!state.weekData.states[memberId]) {
+    state.weekData.states[memberId] = buildDefaultState();
+  }
+  if (!state.weekData.tasks[memberId]) {
+    state.weekData.tasks[memberId] = [];
+  }
+  if (!state.weekData.roleplays[memberId]) {
+    state.weekData.roleplays[memberId] = [];
   }
 };
 
-const loadRoster = async () => {
-  state.roster = await apiFetch(`roster-get?teamId=${state.teamId}`);
-};
-
-const saveRoster = async () => {
-  const payload = {
-    members: state.roster.members,
-  };
-  state.roster = await apiFetch(`roster-save?teamId=${state.teamId}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
+const loadTeams = async () => {
+  const data = await apiFetch("teams-list");
+  state.teams = data.teams || [];
+  elements.teamSelect.innerHTML = "";
+  state.teams.forEach((team) => {
+    const option = document.createElement("option");
+    option.value = team.id;
+    option.textContent = team.name;
+    elements.teamSelect.append(option);
   });
 };
 
-const loadWeek = async () => {
-  state.week = await apiFetch(
-    `week-get?teamId=${state.teamId}&isoWeek=${state.isoWeek}`
-  );
+const loadRoster = async () => {
+  const data = await apiFetch(`roster-get?teamId=${state.teamId}`);
+  state.roster = data.members || [];
 };
 
-const saveWeek = async () => {
-  const payload = {
-    members: state.week.members,
-    summary: `Updated week ${state.isoWeek}`,
-  };
-  state.week = await apiFetch(
-    `week-patch?teamId=${state.teamId}&isoWeek=${state.isoWeek}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }
+const loadWeek = async () => {
+  const data = await apiFetch(
+    `week-get?teamId=${state.teamId}&isoWeek=${state.isoWeek}`
   );
+  state.weekData = {
+    states: data.states || {},
+    tasks: data.tasks || {},
+    roleplays: data.roleplays || {},
+  };
+  if (Array.isArray(data.members)) {
+    state.roster = data.members;
+  }
+  state.roster.forEach((member) => ensureMemberData(member.id));
 };
 
 const loadWeeksList = async () => {
@@ -124,14 +150,34 @@ const loadWeeksList = async () => {
 
 const renderRoster = () => {
   elements.rosterList.innerHTML = "";
-  state.roster.members.forEach((member) => {
+  if (state.roster.length === 0) {
+    elements.rosterList.textContent = "No members yet.";
+    return;
+  }
+
+  state.roster.forEach((member) => {
     const row = document.createElement("div");
-    row.className = "inline";
+    row.className = "roster-row";
 
     const nameInput = document.createElement("input");
     nameInput.value = member.name;
+    nameInput.placeholder = "Name";
     nameInput.addEventListener("input", (event) => {
       member.name = event.target.value;
+    });
+
+    const emailInput = document.createElement("input");
+    emailInput.value = member.email || "";
+    emailInput.placeholder = "Email (optional)";
+    emailInput.addEventListener("input", (event) => {
+      member.email = event.target.value;
+    });
+
+    const phoneInput = document.createElement("input");
+    phoneInput.value = member.phone || "";
+    phoneInput.placeholder = "Phone (optional)";
+    phoneInput.addEventListener("input", (event) => {
+      member.phone = event.target.value;
     });
 
     const activeToggle = document.createElement("select");
@@ -142,9 +188,10 @@ const renderRoster = () => {
     activeToggle.value = String(member.active);
     activeToggle.addEventListener("change", (event) => {
       member.active = event.target.value === "true";
+      renderMembers();
     });
 
-    row.append(nameInput, activeToggle);
+    row.append(nameInput, emailInput, phoneInput, activeToggle);
     elements.rosterList.append(row);
   });
 };
@@ -156,26 +203,29 @@ const renderWeeksList = () => {
     return;
   }
 
-  state.weeksList
-    .slice()
-    .sort()
-    .forEach((week) => {
-      const button = document.createElement("button");
-      button.className = "secondary";
-      button.textContent = week;
-      button.addEventListener("click", async () => {
-        state.isoWeek = week;
-        elements.isoWeek.value = week;
-        await loadWeek();
-        renderMembers();
-      });
-      elements.weeksList.append(button);
+  state.weeksList.forEach((week) => {
+    const button = document.createElement("button");
+    button.className = "secondary";
+    button.textContent = week;
+    if (week === state.isoWeek) {
+      button.classList.add("active");
+    }
+    button.addEventListener("click", async () => {
+      state.isoWeek = week;
+      elements.isoWeek.value = week;
+      await loadWeek();
+      renderMembers();
+      renderWeeksList();
     });
+    elements.weeksList.append(button);
+  });
 };
 
 const renderMemberCard = (member) => {
-  ensureMemberState(member.id);
-  const data = state.week.members[member.id];
+  ensureMemberData(member.id);
+  const data = state.weekData.states[member.id];
+  const tasks = state.weekData.tasks[member.id];
+  const roleplays = state.weekData.roleplays[member.id];
 
   const card = document.createElement("div");
   card.className = "member-card";
@@ -189,18 +239,18 @@ const renderMemberCard = (member) => {
   const weeklyFocus = document.createElement("label");
   const weeklyFocusInput = document.createElement("input");
   weeklyFocusInput.type = "checkbox";
-  weeklyFocusInput.checked = data.checklist.weeklyFocusSet;
+  weeklyFocusInput.checked = data.weeklyFocusSet;
   weeklyFocusInput.addEventListener("change", (event) => {
-    data.checklist.weeklyFocusSet = event.target.checked;
+    data.weeklyFocusSet = event.target.checked;
   });
   weeklyFocus.append(weeklyFocusInput, "Weekly focus set");
 
   const roleplayDone = document.createElement("label");
   const roleplayInput = document.createElement("input");
   roleplayInput.type = "checkbox";
-  roleplayInput.checked = data.checklist.roleplayDone;
+  roleplayInput.checked = data.roleplayDone;
   roleplayInput.addEventListener("change", (event) => {
-    data.checklist.roleplayDone = event.target.checked;
+    data.roleplayDone = event.target.checked;
   });
   roleplayDone.append(roleplayInput, "Roleplay done");
 
@@ -214,21 +264,23 @@ const renderMemberCard = (member) => {
     wrapper.className = "counter";
 
     const minus = document.createElement("button");
+    minus.type = "button";
     minus.textContent = "-";
     minus.addEventListener("click", () => {
-      data.counters[key] = Math.max(0, data.counters[key] - 1);
-      value.textContent = data.counters[key];
+      data[key] = Math.max(0, data[key] - 1);
+      value.textContent = data[key];
     });
 
     const plus = document.createElement("button");
+    plus.type = "button";
     plus.textContent = "+";
     plus.addEventListener("click", () => {
-      data.counters[key] += 1;
-      value.textContent = data.counters[key];
+      data[key] += 1;
+      value.textContent = data[key];
     });
 
     const value = document.createElement("span");
-    value.textContent = data.counters[key];
+    value.textContent = data[key];
 
     const labelEl = document.createElement("strong");
     labelEl.textContent = label;
@@ -252,7 +304,7 @@ const renderMemberCard = (member) => {
 
   const renderTasks = () => {
     taskList.innerHTML = "";
-    data.customTasks.forEach((task) => {
+    tasks.forEach((task) => {
       const row = document.createElement("div");
       row.className = "task-item";
       const checkbox = document.createElement("input");
@@ -270,7 +322,7 @@ const renderMemberCard = (member) => {
       remove.className = "danger";
       remove.textContent = "Remove";
       remove.addEventListener("click", () => {
-        data.customTasks = data.customTasks.filter((t) => t.id !== task.id);
+        state.weekData.tasks[member.id] = tasks.filter((t) => t.id !== task.id);
         renderTasks();
       });
       row.append(checkbox, label, remove);
@@ -287,7 +339,7 @@ const renderMemberCard = (member) => {
   addTask.textContent = "Add";
   addTask.addEventListener("click", () => {
     if (!taskInput.value.trim()) return;
-    data.customTasks.push({
+    tasks.push({
       id: crypto.randomUUID(),
       label: taskInput.value.trim(),
       done: false,
@@ -310,7 +362,7 @@ const renderMemberCard = (member) => {
 
   const renderRoleplays = () => {
     roleplayList.innerHTML = "";
-    data.roleplays.forEach((entry) => {
+    roleplays.forEach((entry) => {
       const row = document.createElement("div");
       row.className = "roleplay-item";
       const type = document.createElement("input");
@@ -319,7 +371,7 @@ const renderMemberCard = (member) => {
         entry.type = event.target.value;
       });
       const note = document.createElement("input");
-      note.value = entry.note;
+      note.value = entry.note || "";
       note.addEventListener("input", (event) => {
         entry.note = event.target.value;
       });
@@ -330,7 +382,9 @@ const renderMemberCard = (member) => {
       remove.className = "danger";
       remove.textContent = "Remove";
       remove.addEventListener("click", () => {
-        data.roleplays = data.roleplays.filter((r) => r.id !== entry.id);
+        state.weekData.roleplays[member.id] = roleplays.filter(
+          (r) => r.id !== entry.id
+        );
         renderRoleplays();
       });
       row.append(type, note, timestamp, remove);
@@ -349,7 +403,7 @@ const renderMemberCard = (member) => {
   addRoleplay.textContent = "Add";
   addRoleplay.addEventListener("click", () => {
     if (!roleplayType.value.trim()) return;
-    data.roleplays.push({
+    roleplays.push({
       id: crypto.randomUUID(),
       type: roleplayType.value.trim(),
       note: roleplayNote.value.trim(),
@@ -381,7 +435,7 @@ const renderMemberCard = (member) => {
 
 const renderMembers = () => {
   elements.membersPanel.innerHTML = "";
-  const activeMembers = state.roster.members.filter((member) => member.active);
+  const activeMembers = state.roster.filter((member) => member.active);
   if (activeMembers.length === 0) {
     elements.membersPanel.textContent = "No active members yet.";
     return;
@@ -396,11 +450,45 @@ const exportHistory = async (query, label) => {
   const data = await apiFetch(`history-export?${query}`);
   const json = JSON.stringify(data, null, 2);
   await navigator.clipboard.writeText(json);
-  const prompt = `${label} data copied to clipboard. Analyze weekly trends and highlight wins, risks, and coaching actions.`;
+  const prompt = `${label} copied. Analyze weekly trends and highlight wins, risks, and coaching actions.`;
   const urlPrompt = encodeURIComponent(prompt);
-  const chatUrl = `https://chat.openai.com/?q=${urlPrompt}`;
-  window.open(chatUrl, "_blank", "noopener");
-  elements.exportStatus.textContent = "Copied to clipboard. ChatGPT opened.";
+  window.open(`https://chatgpt.com/?q=${urlPrompt}`, "_blank", "noopener");
+  elements.exportStatus.textContent = "JSON copied. Paste into ChatGPT.";
+  showToast("JSON copied. Paste into ChatGPT.");
+};
+
+const saveRoster = async () => {
+  for (const member of state.roster) {
+    await apiFetch("roster-update", {
+      method: "PUT",
+      body: JSON.stringify({
+        memberId: member.id,
+        name: member.name,
+        active: member.active,
+        email: member.email,
+        phone: member.phone,
+      }),
+    });
+  }
+};
+
+const saveWeek = async () => {
+  elements.weekStatus.textContent = "Saving...";
+  for (const member of state.roster) {
+    ensureMemberData(member.id);
+    await apiFetch(`week-patch?teamId=${state.teamId}&isoWeek=${state.isoWeek}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        memberId: member.id,
+        state: state.weekData.states[member.id],
+        tasks: state.weekData.tasks[member.id],
+        roleplays: state.weekData.roleplays[member.id],
+      }),
+    });
+  }
+  elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
+  await loadWeeksList();
+  renderWeeksList();
 };
 
 const initialize = async () => {
@@ -410,6 +498,13 @@ const initialize = async () => {
   }
 
   elements.actorSelect.value = state.actor;
+
+  await loadTeams();
+  if (state.teams.length > 0) {
+    state.teamId = state.teams[0].id;
+    elements.teamSelect.value = state.teamId;
+  }
+
   state.isoWeek = getIsoWeekString(getDenverNow());
   elements.isoWeek.value = state.isoWeek;
 
@@ -428,6 +523,8 @@ if (!state.token) {
 
 elements.teamSelect.addEventListener("change", async (event) => {
   state.teamId = event.target.value;
+  state.isoWeek = getIsoWeekString(getDenverNow());
+  elements.isoWeek.value = state.isoWeek;
   await loadRoster();
   await loadWeek();
   await loadWeeksList();
@@ -439,13 +536,24 @@ elements.teamSelect.addEventListener("change", async (event) => {
 elements.addMember.addEventListener("click", async () => {
   const name = elements.newMemberName.value.trim();
   if (!name) return;
-  state.roster.members.push({
-    id: crypto.randomUUID(),
-    name,
-    active: true,
-    meta: { phone: "", email: "" },
+  const email = elements.newMemberEmail.value.trim();
+  const phone = elements.newMemberPhone.value.trim();
+  const data = await apiFetch(`roster-save?teamId=${state.teamId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      email,
+      phone,
+      active: true,
+    }),
   });
+  if (data?.member) {
+    state.roster.push(data.member);
+    ensureMemberData(data.member.id);
+  }
   elements.newMemberName.value = "";
+  elements.newMemberEmail.value = "";
+  elements.newMemberPhone.value = "";
   renderRoster();
   renderMembers();
 });
@@ -457,17 +565,14 @@ elements.saveRoster.addEventListener("click", async () => {
 
 elements.saveWeek.addEventListener("click", async () => {
   await saveWeek();
-  elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
-  await loadWeeksList();
-  renderWeeksList();
 });
 
 elements.exportTeam.addEventListener("click", async () => {
-  await exportHistory(`teamId=${state.teamId}`, "Team history");
+  await exportHistory(`teamId=${state.teamId}`, "Team history JSON");
 });
 
 elements.exportAll.addEventListener("click", async () => {
-  await exportHistory("allTeams=1", "All teams history");
+  await exportHistory("allTeams=1", "All teams history JSON");
 });
 
 elements.clearToken.addEventListener("click", () => {
