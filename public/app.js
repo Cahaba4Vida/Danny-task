@@ -192,6 +192,24 @@ const updateFilterVisibility = () => {
   }
 };
 
+const setLoadingState = (isLoading) => {
+  if (elements.weekStatus) {
+    elements.weekStatus.textContent = isLoading ? "Loading..." : "";
+  }
+  if (elements.rosterList) {
+    elements.rosterList.textContent = isLoading ? "Loading roster..." : "";
+  }
+  if (elements.membersPanel) {
+    elements.membersPanel.textContent = isLoading ? "Loading members..." : "";
+  }
+  if (elements.weeklyTasks) {
+    elements.weeklyTasks.innerHTML = "";
+  }
+  if (elements.weeksList) {
+    elements.weeksList.textContent = isLoading ? "Loading history..." : "";
+  }
+};
+
 const loadTeams = async () => {
   const sql = getSql();
   const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
@@ -211,24 +229,6 @@ const loadTeams = async () => {
     option.textContent = team.name;
     elements.newMemberTeam.append(option);
   });
-};
-
-const loadRoster = async () => {
-  const sql = getSql();
-  const rows =
-    state.teamId === "all"
-      ? await sql`
-          SELECT id, name, active, email, phone, team_id
-          FROM members
-          ORDER BY team_id ASC, created_at ASC
-        `
-      : await sql`
-          SELECT id, name, active, email, phone, team_id
-          FROM members
-          WHERE team_id = ${state.teamId}
-          ORDER BY created_at ASC
-        `;
-  state.roster = rows || [];
 };
 
 const loadWeek = async () => {
@@ -460,6 +460,7 @@ const renderWeeksList = () => {
   state.weeksList.forEach((week) => {
     const button = document.createElement("button");
     button.className = "secondary";
+    button.type = "button";
     button.textContent = week;
     if (week === state.isoWeek) {
       button.classList.add("active");
@@ -1108,9 +1109,12 @@ const initialize = async () => {
   state.isoWeek = getIsoWeekString(getDenverNow());
   elements.isoWeek.value = state.isoWeek;
 
-  await loadRoster();
-  await loadWeek();
-  await loadWeeksList();
+  setLoadingState(true);
+  try {
+    await Promise.all([loadWeek(), loadWeeksList()]);
+  } finally {
+    setLoadingState(false);
+  }
 
   updateFilterVisibility();
   if (elements.rosterFilter) {
@@ -1146,9 +1150,12 @@ elements.teamSelect.addEventListener("change", async (event) => {
         ? elements.newMemberTeam.options[0].value
         : state.teamId;
   }
-  await loadRoster();
-  await loadWeek();
-  await loadWeeksList();
+  setLoadingState(true);
+  try {
+    await Promise.all([loadWeek(), loadWeeksList()]);
+  } finally {
+    setLoadingState(false);
+  }
   updateFilterVisibility();
   if (elements.toggleRoster) {
     elements.toggleRoster.textContent = state.rosterExpanded
