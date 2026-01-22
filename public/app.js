@@ -17,6 +17,7 @@ const state = {
   },
   weeksList: [],
   membersExpanded: false,
+  rosterExpanded: false,
   rosterFilter: "",
   memberFilter: "",
 };
@@ -46,6 +47,9 @@ const elements = {
   newMemberTeam: document.getElementById("new-member-team"),
   addMember: document.getElementById("add-member"),
   saveRoster: document.getElementById("save-roster"),
+  toggleRoster: document.getElementById("toggle-roster"),
+  rosterDisplay: document.getElementById("team-roster-display"),
+  rosterTitle: document.getElementById("team-roster-title"),
   memberFilter: document.getElementById("member-filter"),
   membersPanel: document.getElementById("members-panel"),
   toggleMembers: document.getElementById("toggle-members"),
@@ -146,6 +150,12 @@ const getTeamLabel = (teamId) => {
   return team?.name || teamId;
 };
 
+const buildTeamsWithAll = (teams) => {
+  const hasAll = teams.some((team) => team.id === "all");
+  if (hasAll) return teams;
+  return [{ id: "all", name: "All Teams" }, ...teams];
+};
+
 const TASK_CATEGORIES = [
   { value: "general", label: "General" },
   { value: "meeting", label: "Meeting" },
@@ -161,7 +171,7 @@ const updateFilterVisibility = () => {
   if (elements.rosterFilter) {
     elements.rosterFilter.parentElement.classList.toggle(
       "hidden",
-      !showFilters
+      !showFilters || !state.rosterExpanded
     );
     if (!showFilters) {
       elements.rosterFilter.value = "";
@@ -183,7 +193,7 @@ const updateFilterVisibility = () => {
 const loadTeams = async () => {
   const sql = getSql();
   const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
-  state.teams = rows || [];
+  state.teams = buildTeamsWithAll(rows || []);
   elements.teamSelect.innerHTML = "";
   state.teams.forEach((team) => {
     const option = document.createElement("option");
@@ -399,6 +409,42 @@ const renderRoster = () => {
 
     row.append(nameInput, emailInput, phoneInput, teamSelect, activeToggle);
     elements.rosterList.append(row);
+  });
+};
+
+const renderRosterDisplay = () => {
+  if (!elements.rosterDisplay) return;
+  elements.rosterDisplay.innerHTML = "";
+  const teamId = state.teamId === "all" ? null : state.teamId;
+  const displayRoster = teamId
+    ? state.roster.filter((member) => member.team_id === teamId)
+    : state.roster;
+  if (elements.rosterTitle) {
+    elements.rosterTitle.textContent =
+      state.teamId === "all"
+        ? "All teams roster"
+        : `${getTeamLabel(state.teamId)} roster`;
+  }
+  if (displayRoster.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No members to display.";
+    elements.rosterDisplay.append(empty);
+    return;
+  }
+  displayRoster.forEach((member) => {
+    const row = document.createElement("div");
+    row.className = "roster-display-row";
+    const name = document.createElement("span");
+    name.textContent = member.name;
+    row.append(name);
+    if (state.teamId === "all" && member.team_id) {
+      const teamChip = document.createElement("span");
+      teamChip.className = "team-chip";
+      teamChip.textContent = getTeamLabel(member.team_id);
+      row.append(teamChip);
+    }
+    elements.rosterDisplay.append(row);
   });
 };
 
@@ -736,6 +782,7 @@ const renderMembers = () => {
         )
       : activeMembers;
   renderWeeklyTasks(visibleMembers);
+  renderRosterDisplay();
   if (elements.toggleMembers) {
     elements.toggleMembers.textContent = state.membersExpanded
       ? "Hide individuals"
@@ -1043,9 +1090,17 @@ const initialize = async () => {
   if (elements.memberFilter) {
     elements.memberFilter.value = state.memberFilter;
   }
+  if (elements.toggleRoster) {
+    elements.toggleRoster.textContent = state.rosterExpanded
+      ? "Hide universal roster"
+      : "Show universal roster";
+  }
   renderRoster();
   renderMembers();
   renderWeeksList();
+  if (elements.rosterList) {
+    elements.rosterList.classList.toggle("hidden", !state.rosterExpanded);
+  }
 };
 
 if (!state.databaseUrl) {
@@ -1066,6 +1121,11 @@ elements.teamSelect.addEventListener("change", async (event) => {
   await loadWeek();
   await loadWeeksList();
   updateFilterVisibility();
+  if (elements.toggleRoster) {
+    elements.toggleRoster.textContent = state.rosterExpanded
+      ? "Hide universal roster"
+      : "Show universal roster";
+  }
   renderRoster();
   renderMembers();
   renderWeeksList();
@@ -1125,6 +1185,24 @@ elements.actorSelect.addEventListener("change", (event) => {
 elements.toggleMembers.addEventListener("click", () => {
   state.membersExpanded = !state.membersExpanded;
   renderMembers();
+});
+
+elements.toggleRoster.addEventListener("click", () => {
+  state.rosterExpanded = !state.rosterExpanded;
+  if (elements.toggleRoster) {
+    elements.toggleRoster.textContent = state.rosterExpanded
+      ? "Hide universal roster"
+      : "Show universal roster";
+  }
+  if (elements.rosterList) {
+    elements.rosterList.classList.toggle("hidden", !state.rosterExpanded);
+  }
+  if (elements.rosterFilter?.parentElement) {
+    elements.rosterFilter.parentElement.classList.toggle(
+      "hidden",
+      !state.rosterExpanded || state.teamId !== "all"
+    );
+  }
 });
 
 elements.rosterFilter.addEventListener("input", (event) => {

@@ -281,6 +281,19 @@ button.danger {
   display: none;
 }
 
+.panel-divider {
+  border-top: 1px solid #e2e8f0;
+  margin: 1rem 0;
+}
+
+.roster-display-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+}
+
 .toast {
   position: fixed;
   bottom: 1.5rem;

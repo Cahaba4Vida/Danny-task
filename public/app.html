@@ -36,6 +36,7 @@
           <h2>Roster</h2>
           <button id="save-roster" class="secondary">Save Roster</button>
         </div>
+        <button id="toggle-roster" class="secondary">Show universal roster</button>
         <label class="field">
           <span>Find member</span>
           <input id="roster-filter" type="text" placeholder="Search by name" />
@@ -47,6 +48,11 @@
           <input id="new-member-phone" type="text" placeholder="Phone (optional)" />
           <select id="new-member-team"></select>
           <button id="add-member" class="secondary">Add</button>
+        </div>
+        <div class="panel-divider"></div>
+        <div class="stack">
+          <strong id="team-roster-title">Team roster</strong>
+          <div id="team-roster-display" class="stack"></div>
         </div>
       </section>
 
