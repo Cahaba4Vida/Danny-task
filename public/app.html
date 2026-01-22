@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fit Hub - Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Fit Hub Dashboard</h1>
+        <p class="muted">Weekly execution tracker for team leaders.</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="field">
+          <span>Team</span>
+          <select id="team-select">
+            <option value="braxton">Braxton</option>
+            <option value="brannon">Brannon</option>
+            <option value="asher">Asher</option>
+          </select>
+        </div>
+        <div class="field">
+          <span>ISO Week</span>
+          <input id="iso-week" type="text" readonly />
+        </div>
+        <button id="save-week" class="primary">Save Week</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Roster</h2>
+          <button id="save-roster" class="secondary">Save Roster</button>
+        </div>
+        <div id="roster-list" class="stack"></div>
+        <div class="inline">
+          <input id="new-member-name" type="text" placeholder="New member name" />
+          <button id="add-member" class="secondary">Add</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Weekly Execution</h2>
+          <span id="week-status" class="muted"></span>
+        </div>
+        <div id="members-panel" class="stack"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>History</h2>
+        </div>
+        <div id="weeks-list" class="stack"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Export</h2>
+        </div>
+        <div class="stack">
+          <button id="export-team" class="secondary">Export Team History</button>
+          <button id="export-all" class="secondary">Export All Teams History</button>
+          <p id="export-status" class="muted"></p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Settings</h2>
+        </div>
+        <div class="stack">
+          <label class="field">
+            <span>Actor</span>
+            <select id="actor-select">
+              <option value="Braxton">Braxton</option>
+              <option value="Brannon">Brannon</option>
+              <option value="Asher">Asher</option>
+              <option value="Danny">Danny</option>
+            </select>
+          </label>
+          <button id="clear-token" class="secondary">Clear Token</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
