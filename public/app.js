@@ -883,129 +883,166 @@ const exportHistory = async (query, label) => {
 };
 
 const saveRoster = async () => {
-  const sql = getSql();
-  for (const member of state.roster) {
-    const name = member.name?.trim() || "";
-    const email = member.email?.trim() || null;
-    const phone = member.phone?.trim() || null;
-    const teamId = member.team_id || state.teamId;
-    await sql`
-      UPDATE members
-      SET name = ${name},
-          active = ${Boolean(member.active)},
-          email = ${email},
-          phone = ${phone},
-          team_id = ${teamId},
-          updated_at = NOW()
-      WHERE id = ${member.id}
-    `;
+  elements.weekStatus.textContent = "Saving roster...";
+  elements.saveRoster.disabled = true;
+  elements.saveWeek.disabled = true;
+  try {
+    const sql = getSql();
+    for (const member of state.roster) {
+      const name = member.name?.trim() || "";
+      const email = member.email?.trim() || null;
+      const phone = member.phone?.trim() || null;
+      const teamId = member.team_id || state.teamId;
+      await sql`
+        UPDATE members
+        SET name = ${name},
+            active = ${Boolean(member.active)},
+            email = ${email},
+            phone = ${phone},
+            team_id = ${teamId},
+            updated_at = NOW()
+        WHERE id = ${member.id}
+      `;
+    }
+    await loadRoster();
+    await loadWeek();
+    await loadWeeksList();
+    updateFilterVisibility();
+    renderRoster();
+    renderMembers();
+    renderWeeksList();
+    elements.weekStatus.textContent = "Roster saved.";
+    showToast("Roster saved.");
+  } catch (error) {
+    console.error(error);
+    elements.weekStatus.textContent = error.message || "Roster save failed.";
+    showToast("Roster save failed.");
+  } finally {
+    elements.saveRoster.disabled = false;
+    elements.saveWeek.disabled = false;
   }
 };
 
 const saveWeek = async () => {
   elements.weekStatus.textContent = "Saving...";
-  const sql = getSql();
-  const weekId = await ensureWeekId(state.teamId, state.isoWeek);
+  elements.saveWeek.disabled = true;
+  elements.saveRoster.disabled = true;
+  try {
+    const sql = getSql();
+    const weekId = await ensureWeekId(state.teamId, state.isoWeek);
 
-  for (const member of state.roster) {
-    ensureMemberData(member.id);
-    const memberState = state.weekData.states[member.id];
-    await sql`
-      INSERT INTO member_week_state
-        (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, goals, notes, updated_at)
-      VALUES (
-        ${weekId},
-        ${member.id},
-        ${Boolean(memberState.weeklyFocusSet)},
-        ${Boolean(memberState.roleplayDone)},
-        ${Number(memberState.firstMeetings) || 0},
-        ${Number(memberState.signedRecruits) || 0},
-        ${memberState.goals || ""},
-        ${memberState.notes || ""},
-        NOW()
-      )
-      ON CONFLICT (week_id, member_id)
-      DO UPDATE SET
-        weekly_focus_set = EXCLUDED.weekly_focus_set,
-        roleplay_done = EXCLUDED.roleplay_done,
-        first_meetings = EXCLUDED.first_meetings,
-        signed_recruits = EXCLUDED.signed_recruits,
-        goals = EXCLUDED.goals,
-        notes = EXCLUDED.notes,
-        updated_at = NOW()
-    `;
-
-    const roleplays = state.weekData.roleplays[member.id] || [];
-    await sql`
-      DELETE FROM roleplays
-      WHERE week_id = ${weekId} AND member_id = ${member.id}
-    `;
-    for (const entry of roleplays) {
-      if (!entry.id || !entry.type?.trim()) continue;
+    for (const member of state.roster) {
+      ensureMemberData(member.id);
+      const memberState = state.weekData.states[member.id];
       await sql`
-        INSERT INTO roleplays (id, week_id, member_id, type, note, timestamp, created_at)
+        INSERT INTO member_week_state
+          (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, goals, notes, updated_at)
         VALUES (
-          ${entry.id},
           ${weekId},
           ${member.id},
-          ${entry.type.trim()},
-          ${entry.note?.trim() || null},
-          ${entry.timestamp ? new Date(entry.timestamp) : new Date()},
+          ${Boolean(memberState.weeklyFocusSet)},
+          ${Boolean(memberState.roleplayDone)},
+          ${Number(memberState.firstMeetings) || 0},
+          ${Number(memberState.signedRecruits) || 0},
+          ${memberState.goals || ""},
+          ${memberState.notes || ""},
           NOW()
         )
-        ON CONFLICT (id)
-        DO UPDATE SET type = EXCLUDED.type, note = EXCLUDED.note, timestamp = EXCLUDED.timestamp
+        ON CONFLICT (week_id, member_id)
+        DO UPDATE SET
+          weekly_focus_set = EXCLUDED.weekly_focus_set,
+          roleplay_done = EXCLUDED.roleplay_done,
+          first_meetings = EXCLUDED.first_meetings,
+          signed_recruits = EXCLUDED.signed_recruits,
+          goals = EXCLUDED.goals,
+          notes = EXCLUDED.notes,
+          updated_at = NOW()
       `;
-    }
-  }
 
-  await sql`
-    DELETE FROM task_attendance
-    WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = ${weekId})
-  `;
-  await sql`DELETE FROM weekly_tasks WHERE week_id = ${weekId}`;
-
-  for (const task of state.weekData.weekTasks) {
-    if (!task.id || !task.label?.trim()) continue;
-    await sql`
-      INSERT INTO weekly_tasks (id, week_id, label, category, notes, updated_at)
-      VALUES (
-        ${task.id},
-        ${weekId},
-        ${task.label.trim()},
-        ${task.category || "general"},
-        ${task.notes || ""},
-        NOW()
-      )
-      ON CONFLICT (id)
-      DO UPDATE SET
-        label = EXCLUDED.label,
-        category = EXCLUDED.category,
-        notes = EXCLUDED.notes,
-        updated_at = NOW()
-    `;
-  }
-
-  if (state.weekData.taskAttendance) {
-    for (const [taskId, attendanceMap] of Object.entries(
-      state.weekData.taskAttendance
-    )) {
-      if (!taskId) continue;
-      for (const [memberId, attended] of Object.entries(attendanceMap || {})) {
-        if (!memberId) continue;
+      const roleplays = state.weekData.roleplays[member.id] || [];
+      await sql`
+        DELETE FROM roleplays
+        WHERE week_id = ${weekId} AND member_id = ${member.id}
+      `;
+      for (const entry of roleplays) {
+        if (!entry.id || !entry.type?.trim()) continue;
         await sql`
-          INSERT INTO task_attendance (task_id, member_id, attended, updated_at)
-          VALUES (${taskId}, ${memberId}, ${Boolean(attended)}, NOW())
-          ON CONFLICT (task_id, member_id)
-          DO UPDATE SET attended = EXCLUDED.attended, updated_at = NOW()
+          INSERT INTO roleplays (id, week_id, member_id, type, note, timestamp, created_at)
+          VALUES (
+            ${entry.id},
+            ${weekId},
+            ${member.id},
+            ${entry.type.trim()},
+            ${entry.note?.trim() || null},
+            ${entry.timestamp ? new Date(entry.timestamp) : new Date()},
+            NOW()
+          )
+          ON CONFLICT (id)
+          DO UPDATE SET type = EXCLUDED.type, note = EXCLUDED.note, timestamp = EXCLUDED.timestamp
         `;
       }
     }
-  }
 
-  elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
-  await loadWeeksList();
-  renderWeeksList();
+    await sql`
+      DELETE FROM task_attendance
+      WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = ${weekId})
+    `;
+    await sql`DELETE FROM weekly_tasks WHERE week_id = ${weekId}`;
+
+    for (const task of state.weekData.weekTasks) {
+      if (!task.id || !task.label?.trim()) continue;
+      await sql`
+        INSERT INTO weekly_tasks (id, week_id, label, category, notes, updated_at)
+        VALUES (
+          ${task.id},
+          ${weekId},
+          ${task.label.trim()},
+          ${task.category || "general"},
+          ${task.notes || ""},
+          NOW()
+        )
+        ON CONFLICT (id)
+        DO UPDATE SET
+          label = EXCLUDED.label,
+          category = EXCLUDED.category,
+          notes = EXCLUDED.notes,
+          updated_at = NOW()
+      `;
+    }
+
+    if (state.weekData.taskAttendance) {
+      for (const [taskId, attendanceMap] of Object.entries(
+        state.weekData.taskAttendance
+      )) {
+        if (!taskId) continue;
+        for (const [memberId, attended] of Object.entries(
+          attendanceMap || {}
+        )) {
+          if (!memberId) continue;
+          await sql`
+            INSERT INTO task_attendance (task_id, member_id, attended, updated_at)
+            VALUES (${taskId}, ${memberId}, ${Boolean(attended)}, NOW())
+            ON CONFLICT (task_id, member_id)
+            DO UPDATE SET attended = EXCLUDED.attended, updated_at = NOW()
+          `;
+        }
+      }
+    }
+
+    await loadWeek();
+    await loadWeeksList();
+    renderMembers();
+    renderWeeksList();
+    elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
+    showToast(`Saved ${state.isoWeek}.`);
+  } catch (error) {
+    console.error(error);
+    elements.weekStatus.textContent = error.message || "Week save failed.";
+    showToast("Week save failed.");
+  } finally {
+    elements.saveWeek.disabled = false;
+    elements.saveRoster.disabled = false;
+  }
 };
 
 const initialize = async () => {
@@ -1097,7 +1134,6 @@ elements.addMember.addEventListener("click", async () => {
 
 elements.saveRoster.addEventListener("click", async () => {
   await saveRoster();
-  elements.weekStatus.textContent = "Roster saved.";
 });
 
 elements.saveWeek.addEventListener("click", async () => {
