@@ -52,10 +52,17 @@ exports.handler = async (event) => {
       );
 
       const taskResult = await client.query(
-        `SELECT id, member_id, label, done, created_at, updated_at
-         FROM custom_tasks
+        `SELECT id, label, created_at, updated_at
+         FROM weekly_tasks
          WHERE week_id = $1
          ORDER BY created_at ASC`,
+        [weekId]
+      );
+
+      const attendanceResult = await client.query(
+        `SELECT task_id, member_id, attended, updated_at
+         FROM task_attendance
+         WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = $1)`,
         [weekId]
       );
 
@@ -79,16 +86,19 @@ exports.handler = async (event) => {
         };
       });
 
-      const tasks = {};
-      taskResult.rows.forEach((row) => {
-        if (!tasks[row.member_id]) tasks[row.member_id] = [];
-        tasks[row.member_id].push({
-          id: row.id,
-          label: row.label,
-          done: row.done,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        });
+      const weekTasks = taskResult.rows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+
+      const taskAttendance = {};
+      attendanceResult.rows.forEach((row) => {
+        if (!taskAttendance[row.task_id]) {
+          taskAttendance[row.task_id] = {};
+        }
+        taskAttendance[row.task_id][row.member_id] = row.attended;
       });
 
       const roleplays = {};
@@ -107,9 +117,6 @@ exports.handler = async (event) => {
         if (!states[member.id]) {
           states[member.id] = buildDefaultState();
         }
-        if (!tasks[member.id]) {
-          tasks[member.id] = [];
-        }
         if (!roleplays[member.id]) {
           roleplays[member.id] = [];
         }
@@ -121,7 +128,8 @@ exports.handler = async (event) => {
         isoWeek,
         members: membersResult.rows,
         states,
-        tasks,
+        weekTasks,
+        taskAttendance,
         roleplays,
       };
     });

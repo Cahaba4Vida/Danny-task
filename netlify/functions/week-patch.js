@@ -39,7 +39,11 @@ exports.handler = async (event) => {
 
   const actor = getHeader(event.headers, "x-actor") || "Unknown";
   const state = normalizeState(body.state);
-  const tasks = Array.isArray(body.tasks) ? body.tasks : null;
+  const weekTasks = Array.isArray(body.weekTasks) ? body.weekTasks : null;
+  const taskAttendance =
+    body.taskAttendance && typeof body.taskAttendance === "object"
+      ? body.taskAttendance
+      : null;
   const roleplays = Array.isArray(body.roleplays) ? body.roleplays : null;
 
   try {
@@ -77,36 +81,53 @@ exports.handler = async (event) => {
         ]
       );
 
-      if (tasks) {
-        const taskIds = tasks.map((task) => task.id).filter(Boolean);
+      if (weekTasks) {
+        const taskIds = weekTasks.map((task) => task.id).filter(Boolean);
         if (taskIds.length > 0) {
           await client.query(
-            `DELETE FROM custom_tasks
-             WHERE week_id = $1 AND member_id = $2 AND id <> ALL($3::uuid[])`,
-            [weekId, memberId, taskIds]
+            `DELETE FROM weekly_tasks
+             WHERE week_id = $1 AND id <> ALL($2::uuid[])`,
+            [weekId, taskIds]
           );
         } else {
           await client.query(
-            "DELETE FROM custom_tasks WHERE week_id = $1 AND member_id = $2",
-            [weekId, memberId]
+            "DELETE FROM weekly_tasks WHERE week_id = $1",
+            [weekId]
           );
         }
 
-        for (const task of tasks) {
+        for (const task of weekTasks) {
           if (!task.id || !task.label?.trim()) continue;
           await client.query(
-            `INSERT INTO custom_tasks (id, week_id, member_id, label, done, updated_at)
-             VALUES ($1, $2, $3, $4, $5, NOW())
+            `INSERT INTO weekly_tasks (id, week_id, label, updated_at)
+             VALUES ($1, $2, $3, NOW())
              ON CONFLICT (id)
-             DO UPDATE SET label = EXCLUDED.label, done = EXCLUDED.done, updated_at = NOW()`,
-            [
-              task.id,
-              weekId,
-              memberId,
-              task.label.trim(),
-              Boolean(task.done),
-            ]
+             DO UPDATE SET label = EXCLUDED.label, updated_at = NOW()`,
+            [task.id, weekId, task.label.trim()]
           );
+        }
+
+        if (taskAttendance) {
+          for (const task of weekTasks) {
+            if (!task.id) continue;
+            const attendanceMap = taskAttendance[task.id] || {};
+            await client.query(
+              "DELETE FROM task_attendance WHERE task_id = $1",
+              [task.id]
+            );
+            for (const [attendanceMemberId, attended] of Object.entries(
+              attendanceMap
+            )) {
+              if (!attendanceMemberId) continue;
+              await client.query(
+                `INSERT INTO task_attendance (task_id, member_id, attended, updated_at)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (task_id, member_id)
+                 DO UPDATE SET attended = EXCLUDED.attended, updated_at = NOW()`,
+                [task.id, attendanceMemberId, Boolean(attended)]
+              );
+            }
+          }
         }
       }
 
@@ -159,7 +180,10 @@ exports.handler = async (event) => {
           {
             memberId,
             state,
-            tasksCount: tasks ? tasks.length : null,
+            weekTasksCount: weekTasks ? weekTasks.length : null,
+            taskAttendanceEntries: taskAttendance
+              ? Object.keys(taskAttendance).length
+              : null,
             roleplaysCount: roleplays ? roleplays.length : null,
           },
         ]
