@@ -218,6 +218,20 @@ button.danger {
 .weekly-task-header {
   display: grid;
   gap: 0.4rem;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+
+.task-meta {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+}
+
+.task-meta input,
+.task-meta select {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
 }
 
 .attendance-summary {
@@ -227,7 +241,7 @@ button.danger {
 .attendance-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .task-actions {
@@ -239,11 +253,32 @@ button.danger {
 .attendance-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 999px;
   background: #f1f5f9;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+  margin-left: 0.35rem;
+}
+
+.attendance-toggle--all {
+  background: #e2e8f0;
+  font-weight: 600;
+}
+
+.hidden {
+  display: none;
 }
 
 .toast {
