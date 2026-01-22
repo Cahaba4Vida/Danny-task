@@ -15,11 +15,7 @@
       <div class="topbar-actions">
         <div class="field">
           <span>Team</span>
-          <select id="team-select">
-            <option value="braxton">Braxton</option>
-            <option value="brannon">Brannon</option>
-            <option value="asher">Asher</option>
-          </select>
+          <select id="team-select"></select>
         </div>
         <div class="field">
           <span>ISO Week</span>
@@ -36,8 +32,10 @@
           <button id="save-roster" class="secondary">Save Roster</button>
         </div>
         <div id="roster-list" class="stack"></div>
-        <div class="inline">
+        <div class="inline add-member">
           <input id="new-member-name" type="text" placeholder="New member name" />
+          <input id="new-member-email" type="email" placeholder="Email (optional)" />
+          <input id="new-member-phone" type="text" placeholder="Phone (optional)" />
           <button id="add-member" class="secondary">Add</button>
         </div>
       </section>
@@ -86,6 +84,8 @@
         </div>
       </section>
     </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <script src="/app.js"></script>
   </body>
