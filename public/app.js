@@ -20,6 +20,7 @@ const state = {
   rosterExpanded: false,
   rosterFilter: "",
   memberFilter: "",
+  memberCollapsed: {},
 };
 
 let sqlClient = null;
@@ -476,9 +477,16 @@ const renderWeeksList = () => {
 const renderMemberCard = (member) => {
   ensureMemberData(member.id);
   const data = state.weekData.states[member.id];
+  const isCollapsed =
+    state.memberCollapsed[member.id] === undefined
+      ? true
+      : state.memberCollapsed[member.id];
 
   const card = document.createElement("div");
   card.className = "member-card";
+
+  const header = document.createElement("div");
+  header.className = "member-card-header";
 
   const title = document.createElement("h3");
   title.textContent = member.name;
@@ -487,6 +495,25 @@ const renderMemberCard = (member) => {
     teamChip.className = "team-chip";
     teamChip.textContent = getTeamLabel(member.team_id);
     title.append(teamChip);
+  }
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "secondary";
+  toggle.textContent = isCollapsed ? "Show" : "Hide";
+  toggle.addEventListener("click", () => {
+    const nextState = !state.memberCollapsed[member.id];
+    state.memberCollapsed[member.id] = nextState;
+    body.classList.toggle("hidden", nextState);
+    toggle.textContent = nextState ? "Show" : "Hide";
+  });
+
+  header.append(title, toggle);
+
+  const body = document.createElement("div");
+  body.className = "member-card-body";
+  if (isCollapsed) {
+    body.classList.add("hidden");
   }
 
   const counters = document.createElement("div");
@@ -546,7 +573,8 @@ const renderMemberCard = (member) => {
   });
   notesField.append(notesLabel, notesInput);
 
-  card.append(title, counters, goalsField, notesField);
+  body.append(counters, goalsField, notesField);
+  card.append(header, body);
   return card;
 };
 
