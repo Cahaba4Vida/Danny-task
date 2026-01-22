@@ -58,6 +58,13 @@ h2 {
   padding: 1.5rem;
 }
 
+.app-footer {
+  text-align: center;
+  padding: 1.5rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
 .panel {
   background: #fff;
   border-radius: 16px;
@@ -194,6 +201,60 @@ button.danger {
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.weekly-tasks h3 {
+  margin: 0;
+}
+
+.weekly-task-row {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.weekly-task-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.weekly-task-controls input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.weekly-task-header {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.attendance-summary {
+  font-size: 0.85rem;
+}
+
+.attendance-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.attendance-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 0.85rem;
 }
 
 .toast {

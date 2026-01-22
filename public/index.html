@@ -3,8 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Fit Hub - Access</title>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   </head>
   <body class="page">
     <main class="card">
@@ -26,6 +31,9 @@
       <button id="enter-button" class="primary">Enter</button>
       <p id="error" class="error"></p>
     </main>
+    <footer class="app-footer">
+      <span>© Designed by zachedwardsllc</span>
+    </footer>
 
     <script>
       const tokenInput = document.getElementById("token-input");

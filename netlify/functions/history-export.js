@@ -17,7 +17,6 @@ const buildMemberMap = (members) => {
         signedRecruits: 0,
         notes: "",
       },
-      tasks: [],
       roleplays: [],
     });
   });
@@ -82,17 +81,26 @@ exports.handler = async (event) => {
         });
 
         const taskResult = await client.query(
-          `SELECT id, member_id, label, done
-           FROM custom_tasks
+          `SELECT id, label
+           FROM weekly_tasks
            WHERE week_id = $1
            ORDER BY created_at ASC`,
           [week.id]
         );
 
-        taskResult.rows.forEach((row) => {
-          const entry = memberMap.get(row.member_id);
-          if (!entry) return;
-          entry.tasks.push({ id: row.id, label: row.label, done: row.done });
+        const attendanceResult = await client.query(
+          `SELECT task_id, member_id, attended
+           FROM task_attendance
+           WHERE task_id IN (SELECT id FROM weekly_tasks WHERE week_id = $1)`,
+          [week.id]
+        );
+
+        const taskAttendance = {};
+        attendanceResult.rows.forEach((row) => {
+          if (!taskAttendance[row.task_id]) {
+            taskAttendance[row.task_id] = {};
+          }
+          taskAttendance[row.task_id][row.member_id] = row.attended;
         });
 
         const roleplayResult = await client.query(
@@ -117,6 +125,11 @@ exports.handler = async (event) => {
         history.push({
           teamId: week.team_id,
           isoWeek: week.iso_week,
+          weekTasks: taskResult.rows.map((row) => ({
+            id: row.id,
+            label: row.label,
+            attendance: taskAttendance[row.id] || {},
+          })),
           members: Array.from(memberMap.values()),
         });
       }

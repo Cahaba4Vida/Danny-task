@@ -7,8 +7,9 @@ const state = {
   roster: [],
   weekData: {
     states: {},
-    tasks: {},
     roleplays: {},
+    weekTasks: [],
+    taskAttendance: {},
   },
   weeksList: [],
 };
@@ -25,6 +26,7 @@ const elements = {
   membersPanel: document.getElementById("members-panel"),
   weeksList: document.getElementById("weeks-list"),
   weekStatus: document.getElementById("week-status"),
+  weeklyTasks: document.getElementById("weekly-tasks"),
   saveWeek: document.getElementById("save-week"),
   exportTeam: document.getElementById("export-team"),
   exportAll: document.getElementById("export-all"),
@@ -103,12 +105,28 @@ const ensureMemberData = (memberId) => {
   if (!state.weekData.states[memberId]) {
     state.weekData.states[memberId] = buildDefaultState();
   }
-  if (!state.weekData.tasks[memberId]) {
-    state.weekData.tasks[memberId] = [];
-  }
   if (!state.weekData.roleplays[memberId]) {
     state.weekData.roleplays[memberId] = [];
   }
+};
+
+const ensureWeekTaskData = () => {
+  if (!Array.isArray(state.weekData.weekTasks)) {
+    state.weekData.weekTasks = [];
+  }
+  if (!state.weekData.taskAttendance) {
+    state.weekData.taskAttendance = {};
+  }
+  state.weekData.weekTasks.forEach((task) => {
+    if (!state.weekData.taskAttendance[task.id]) {
+      state.weekData.taskAttendance[task.id] = {};
+    }
+    state.roster.forEach((member) => {
+      if (state.weekData.taskAttendance[task.id][member.id] === undefined) {
+        state.weekData.taskAttendance[task.id][member.id] = false;
+      }
+    });
+  });
 };
 
 const loadTeams = async () => {
@@ -134,13 +152,15 @@ const loadWeek = async () => {
   );
   state.weekData = {
     states: data.states || {},
-    tasks: data.tasks || {},
     roleplays: data.roleplays || {},
+    weekTasks: data.weekTasks || [],
+    taskAttendance: data.taskAttendance || {},
   };
   if (Array.isArray(data.members)) {
     state.roster = data.members;
   }
   state.roster.forEach((member) => ensureMemberData(member.id));
+  ensureWeekTaskData();
 };
 
 const loadWeeksList = async () => {
@@ -224,7 +244,6 @@ const renderWeeksList = () => {
 const renderMemberCard = (member) => {
   ensureMemberData(member.id);
   const data = state.weekData.states[member.id];
-  const tasks = state.weekData.tasks[member.id];
   const roleplays = state.weekData.roleplays[member.id];
 
   const card = document.createElement("div");
@@ -293,64 +312,6 @@ const renderMemberCard = (member) => {
     buildCounter("First meetings", "firstMeetings"),
     buildCounter("Signed recruits", "signedRecruits")
   );
-
-  const taskSection = document.createElement("div");
-  taskSection.className = "stack";
-  const taskTitle = document.createElement("strong");
-  taskTitle.textContent = "Custom tasks";
-
-  const taskList = document.createElement("div");
-  taskList.className = "stack";
-
-  const renderTasks = () => {
-    taskList.innerHTML = "";
-    tasks.forEach((task) => {
-      const row = document.createElement("div");
-      row.className = "task-item";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = task.done;
-      checkbox.addEventListener("change", (event) => {
-        task.done = event.target.checked;
-      });
-      const label = document.createElement("input");
-      label.value = task.label;
-      label.addEventListener("input", (event) => {
-        task.label = event.target.value;
-      });
-      const remove = document.createElement("button");
-      remove.className = "danger";
-      remove.textContent = "Remove";
-      remove.addEventListener("click", () => {
-        state.weekData.tasks[member.id] = tasks.filter((t) => t.id !== task.id);
-        renderTasks();
-      });
-      row.append(checkbox, label, remove);
-      taskList.append(row);
-    });
-  };
-
-  const taskControls = document.createElement("div");
-  taskControls.className = "inline";
-  const taskInput = document.createElement("input");
-  taskInput.placeholder = "New task";
-  const addTask = document.createElement("button");
-  addTask.className = "secondary";
-  addTask.textContent = "Add";
-  addTask.addEventListener("click", () => {
-    if (!taskInput.value.trim()) return;
-    tasks.push({
-      id: crypto.randomUUID(),
-      label: taskInput.value.trim(),
-      done: false,
-    });
-    taskInput.value = "";
-    renderTasks();
-  });
-  taskControls.append(taskInput, addTask);
-
-  taskSection.append(taskTitle, taskList, taskControls);
-  renderTasks();
 
   const roleplaySection = document.createElement("div");
   roleplaySection.className = "stack";
@@ -429,13 +390,192 @@ const renderMemberCard = (member) => {
   });
   notesField.append(notesLabel, notesInput);
 
-  card.append(title, checklist, counters, taskSection, roleplaySection, notesField);
+  card.append(title, checklist, counters, roleplaySection, notesField);
   return card;
+};
+
+const renderWeeklyTasks = (activeMembers) => {
+  if (!elements.weeklyTasks) return;
+  elements.weeklyTasks.innerHTML = "";
+
+  const section = document.createElement("div");
+  section.className = "weekly-tasks stack";
+
+  const heading = document.createElement("div");
+  heading.className = "panel-header";
+  const title = document.createElement("h3");
+  title.textContent = "Weekly tasks & attendance";
+  heading.append(title);
+
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.textContent =
+    "Add shared tasks for the week and mark attendance for each active teammate.";
+
+  const controls = document.createElement("div");
+  controls.className = "weekly-task-controls";
+  const taskInput = document.createElement("input");
+  taskInput.placeholder = "New weekly task name";
+  const addTask = document.createElement("button");
+  addTask.className = "secondary";
+  addTask.type = "button";
+  addTask.textContent = "Add task";
+  const addTaskHandler = () => {
+    const label = taskInput.value.trim();
+    if (!label) return;
+    const id = crypto.randomUUID();
+    state.weekData.weekTasks.push({ id, label });
+    state.weekData.taskAttendance[id] = {};
+    state.roster.forEach((member) => {
+      state.weekData.taskAttendance[id][member.id] = false;
+    });
+    taskInput.value = "";
+    renderTaskRows();
+  };
+  addTask.addEventListener("click", addTaskHandler);
+  taskInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addTaskHandler();
+    }
+  });
+  controls.append(taskInput, addTask);
+
+  const list = document.createElement("div");
+  list.className = "stack";
+
+  const renderTaskRows = () => {
+    list.innerHTML = "";
+    ensureWeekTaskData();
+
+    if (state.weekData.weekTasks.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "No weekly tasks yet.";
+      list.append(empty);
+      return;
+    }
+
+    state.weekData.weekTasks.forEach((task) => {
+      const row = document.createElement("div");
+      row.className = "weekly-task-row";
+
+      const header = document.createElement("div");
+      header.className = "weekly-task-header";
+
+      const labelInput = document.createElement("input");
+      labelInput.value = task.label;
+      labelInput.placeholder = "Task name";
+      labelInput.addEventListener("input", (event) => {
+        task.label = event.target.value;
+      });
+
+      const summary = document.createElement("span");
+      summary.className = "attendance-summary muted";
+
+      const updateSummary = () => {
+        const total = activeMembers.length;
+        const present = activeMembers.filter(
+          (member) => state.weekData.taskAttendance?.[task.id]?.[member.id]
+        ).length;
+        summary.textContent =
+          total > 0 ? `${present}/${total} marked` : "No active members";
+      };
+
+      header.append(labelInput, summary);
+
+      const attendanceList = document.createElement("div");
+      attendanceList.className = "attendance-list";
+
+      if (activeMembers.length === 0) {
+        const emptyMembers = document.createElement("span");
+        emptyMembers.className = "muted";
+        emptyMembers.textContent = "Add active members to mark attendance.";
+        attendanceList.append(emptyMembers);
+      } else {
+        activeMembers.forEach((member) => {
+          const toggle = document.createElement("label");
+          toggle.className = "attendance-toggle";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = Boolean(
+            state.weekData.taskAttendance?.[task.id]?.[member.id]
+          );
+          checkbox.addEventListener("change", (event) => {
+            if (!state.weekData.taskAttendance[task.id]) {
+              state.weekData.taskAttendance[task.id] = {};
+            }
+            state.weekData.taskAttendance[task.id][member.id] =
+              event.target.checked;
+            updateSummary();
+          });
+          const name = document.createElement("span");
+          name.textContent = member.name;
+          toggle.append(checkbox, name);
+          attendanceList.append(toggle);
+        });
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "task-actions";
+
+      const markAll = document.createElement("button");
+      markAll.type = "button";
+      markAll.className = "secondary";
+      markAll.textContent = "Mark all";
+      markAll.addEventListener("click", () => {
+        if (!state.weekData.taskAttendance[task.id]) {
+          state.weekData.taskAttendance[task.id] = {};
+        }
+        activeMembers.forEach((member) => {
+          state.weekData.taskAttendance[task.id][member.id] = true;
+        });
+        renderTaskRows();
+      });
+
+      const clearAll = document.createElement("button");
+      clearAll.type = "button";
+      clearAll.className = "secondary";
+      clearAll.textContent = "Clear all";
+      clearAll.addEventListener("click", () => {
+        if (!state.weekData.taskAttendance[task.id]) {
+          state.weekData.taskAttendance[task.id] = {};
+        }
+        activeMembers.forEach((member) => {
+          state.weekData.taskAttendance[task.id][member.id] = false;
+        });
+        renderTaskRows();
+      });
+
+      const remove = document.createElement("button");
+      remove.className = "danger";
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        state.weekData.weekTasks = state.weekData.weekTasks.filter(
+          (entry) => entry.id !== task.id
+        );
+        delete state.weekData.taskAttendance[task.id];
+        renderTaskRows();
+      });
+
+      actions.append(markAll, clearAll, remove);
+
+      updateSummary();
+      row.append(header, attendanceList, actions);
+      list.append(row);
+    });
+  };
+
+  section.append(heading, note, controls, list);
+  elements.weeklyTasks.append(section);
+  renderTaskRows();
 };
 
 const renderMembers = () => {
   elements.membersPanel.innerHTML = "";
   const activeMembers = state.roster.filter((member) => member.active);
+  renderWeeklyTasks(activeMembers);
   if (activeMembers.length === 0) {
     elements.membersPanel.textContent = "No active members yet.";
     return;
@@ -474,16 +614,22 @@ const saveRoster = async () => {
 
 const saveWeek = async () => {
   elements.weekStatus.textContent = "Saving...";
+  let tasksSaved = false;
   for (const member of state.roster) {
     ensureMemberData(member.id);
+    const payload = {
+      memberId: member.id,
+      state: state.weekData.states[member.id],
+      roleplays: state.weekData.roleplays[member.id],
+    };
+    if (!tasksSaved) {
+      payload.weekTasks = state.weekData.weekTasks;
+      payload.taskAttendance = state.weekData.taskAttendance;
+      tasksSaved = true;
+    }
     await apiFetch(`week-patch?teamId=${state.teamId}&isoWeek=${state.isoWeek}`, {
       method: "PATCH",
-      body: JSON.stringify({
-        memberId: member.id,
-        state: state.weekData.states[member.id],
-        tasks: state.weekData.tasks[member.id],
-        roleplays: state.weekData.roleplays[member.id],
-      }),
+      body: JSON.stringify(payload),
     });
   }
   elements.weekStatus.textContent = `Saved ${state.isoWeek}.`;
