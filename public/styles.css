@@ -2,7 +2,11 @@
   color-scheme: light;
   font-family: "Inter", system-ui, sans-serif;
   background: #f5f6fb;
-  color: #1d1d1f;
+  color: #0f172a;
+  --brand-navy: #0b1f33;
+  --brand-navy-strong: #102a43;
+  --brand-red: #e11d2e;
+  --brand-slate: #94a3b8;
 }
 
 * {
@@ -37,7 +41,7 @@ h2 {
 }
 
 .topbar {
-  background: #0f172a;
+  background: var(--brand-navy);
   color: #f8fafc;
   padding: 1.5rem;
   display: flex;
@@ -113,13 +117,13 @@ button {
 }
 
 button.primary {
-  background: #2563eb;
+  background: var(--brand-red);
   color: #fff;
 }
 
 button.secondary {
   background: #e2e8f0;
-  color: #0f172a;
+  color: var(--brand-navy);
 }
 
 button.secondary.active {
@@ -161,6 +165,18 @@ button.danger {
   gap: 0.75rem;
 }
 
+.member-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.member-card-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .member-card h3 {
   margin: 0;
 }
@@ -187,7 +203,7 @@ button.danger {
 }
 
 .muted {
-  color: #64748b;
+  color: var(--brand-slate);
   font-size: 0.9rem;
 }
 
@@ -218,6 +234,20 @@ button.danger {
 .weekly-task-header {
   display: grid;
   gap: 0.4rem;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+
+.task-meta {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+}
+
+.task-meta input,
+.task-meta select {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
 }
 
 .attendance-summary {
@@ -227,7 +257,7 @@ button.danger {
 .attendance-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .task-actions {
@@ -239,11 +269,45 @@ button.danger {
 .attendance-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 999px;
   background: #f1f5f9;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+  margin-left: 0.35rem;
+}
+
+.attendance-toggle--all {
+  background: #e2e8f0;
+  font-weight: 600;
+}
+
+.hidden {
+  display: none;
+}
+
+.panel-divider {
+  border-top: 1px solid #e2e8f0;
+  margin: 1rem 0;
+}
+
+.roster-display-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
 }
 
 .toast {
