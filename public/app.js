@@ -5,7 +5,7 @@ neonConfig.fetchConnectionCache = true;
 const state = {
   databaseUrl: localStorage.getItem("fitHubDatabaseUrl"),
   actor: localStorage.getItem("fitHubActor") || "Braxton",
-  teamId: "braxton",
+  teamId: "all",
   isoWeek: "",
   teams: [],
   roster: [],
@@ -16,6 +16,9 @@ const state = {
     taskAttendance: {},
   },
   weeksList: [],
+  membersExpanded: false,
+  rosterFilter: "",
+  memberFilter: "",
 };
 
 let sqlClient = null;
@@ -35,13 +38,17 @@ const getSql = () => {
 const elements = {
   teamSelect: document.getElementById("team-select"),
   isoWeek: document.getElementById("iso-week"),
+  rosterFilter: document.getElementById("roster-filter"),
   rosterList: document.getElementById("roster-list"),
   newMemberName: document.getElementById("new-member-name"),
   newMemberEmail: document.getElementById("new-member-email"),
   newMemberPhone: document.getElementById("new-member-phone"),
+  newMemberTeam: document.getElementById("new-member-team"),
   addMember: document.getElementById("add-member"),
   saveRoster: document.getElementById("save-roster"),
+  memberFilter: document.getElementById("member-filter"),
   membersPanel: document.getElementById("members-panel"),
+  toggleMembers: document.getElementById("toggle-members"),
   weeksList: document.getElementById("weeks-list"),
   weekStatus: document.getElementById("week-status"),
   weeklyTasks: document.getElementById("weekly-tasks"),
@@ -101,6 +108,7 @@ const buildDefaultState = () => ({
   roleplayDone: false,
   firstMeetings: 0,
   signedRecruits: 0,
+  goals: "",
   notes: "",
 });
 
@@ -132,6 +140,46 @@ const ensureWeekTaskData = () => {
   });
 };
 
+const getTeamLabel = (teamId) => {
+  if (!teamId) return "";
+  const team = state.teams.find((entry) => entry.id === teamId);
+  return team?.name || teamId;
+};
+
+const TASK_CATEGORIES = [
+  { value: "general", label: "General" },
+  { value: "meeting", label: "Meeting" },
+  { value: "training", label: "Training" },
+  { value: "outreach", label: "Outreach" },
+  { value: "followup", label: "Follow-up" },
+];
+
+const getFilterText = (value) => value?.trim().toLowerCase() || "";
+
+const updateFilterVisibility = () => {
+  const showFilters = state.teamId === "all";
+  if (elements.rosterFilter) {
+    elements.rosterFilter.parentElement.classList.toggle(
+      "hidden",
+      !showFilters
+    );
+    if (!showFilters) {
+      elements.rosterFilter.value = "";
+      state.rosterFilter = "";
+    }
+  }
+  if (elements.memberFilter) {
+    elements.memberFilter.parentElement.classList.toggle(
+      "hidden",
+      !showFilters
+    );
+    if (!showFilters) {
+      elements.memberFilter.value = "";
+      state.memberFilter = "";
+    }
+  }
+};
+
 const loadTeams = async () => {
   const sql = getSql();
   const rows = await sql`SELECT id, name FROM teams ORDER BY name ASC`;
@@ -140,38 +188,60 @@ const loadTeams = async () => {
   state.teams.forEach((team) => {
     const option = document.createElement("option");
     option.value = team.id;
-    option.textContent = team.name;
+    option.textContent = team.id === "all" ? "All Teams" : team.name;
     elements.teamSelect.append(option);
+  });
+  const assignableTeams = state.teams.filter((team) => team.id !== "all");
+  elements.newMemberTeam.innerHTML = "";
+  assignableTeams.forEach((team) => {
+    const option = document.createElement("option");
+    option.value = team.id;
+    option.textContent = team.name;
+    elements.newMemberTeam.append(option);
   });
 };
 
 const loadRoster = async () => {
   const sql = getSql();
-  const rows = await sql`
-    SELECT id, name, active, email, phone
-    FROM members
-    WHERE team_id = ${state.teamId}
-    ORDER BY created_at ASC
-  `;
+  const rows =
+    state.teamId === "all"
+      ? await sql`
+          SELECT id, name, active, email, phone, team_id
+          FROM members
+          ORDER BY team_id ASC, created_at ASC
+        `
+      : await sql`
+          SELECT id, name, active, email, phone, team_id
+          FROM members
+          WHERE team_id = ${state.teamId}
+          ORDER BY created_at ASC
+        `;
   state.roster = rows || [];
 };
 
 const loadWeek = async () => {
   const sql = getSql();
   const weekId = await ensureWeekId(state.teamId, state.isoWeek);
-  const members = await sql`
-    SELECT id, name, active, email, phone
-    FROM members
-    WHERE team_id = ${state.teamId}
-    ORDER BY created_at ASC
-  `;
+  const members =
+    state.teamId === "all"
+      ? await sql`
+          SELECT id, name, active, email, phone, team_id
+          FROM members
+          ORDER BY team_id ASC, created_at ASC
+        `
+      : await sql`
+          SELECT id, name, active, email, phone, team_id
+          FROM members
+          WHERE team_id = ${state.teamId}
+          ORDER BY created_at ASC
+        `;
   const stateRows = await sql`
-    SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes, updated_at
+    SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, goals, notes, updated_at
     FROM member_week_state
     WHERE week_id = ${weekId}
   `;
   const taskRows = await sql`
-    SELECT id, label, created_at, updated_at
+    SELECT id, label, category, notes, created_at, updated_at
     FROM weekly_tasks
     WHERE week_id = ${weekId}
     ORDER BY created_at ASC
@@ -195,6 +265,7 @@ const loadWeek = async () => {
       roleplayDone: row.roleplay_done,
       firstMeetings: row.first_meetings,
       signedRecruits: row.signed_recruits,
+      goals: row.goals || "",
       notes: row.notes || "",
       updatedAt: row.updated_at,
     };
@@ -203,6 +274,8 @@ const loadWeek = async () => {
   const weekTasks = taskRows.map((row) => ({
     id: row.id,
     label: row.label,
+    category: row.category || "general",
+    notes: row.notes || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -262,12 +335,21 @@ const loadWeeksList = async () => {
 
 const renderRoster = () => {
   elements.rosterList.innerHTML = "";
-  if (state.roster.length === 0) {
+  const filterText =
+    state.teamId === "all" ? getFilterText(state.rosterFilter) : "";
+  const visibleRoster =
+    state.teamId === "all" && filterText
+      ? state.roster.filter((member) =>
+          member.name?.toLowerCase().includes(filterText)
+        )
+      : state.roster;
+  if (visibleRoster.length === 0) {
     elements.rosterList.textContent = "No members yet.";
     return;
   }
+  const assignableTeams = state.teams.filter((team) => team.id !== "all");
 
-  state.roster.forEach((member) => {
+  visibleRoster.forEach((member) => {
     const row = document.createElement("div");
     row.className = "roster-row";
 
@@ -303,7 +385,19 @@ const renderRoster = () => {
       renderMembers();
     });
 
-    row.append(nameInput, emailInput, phoneInput, activeToggle);
+    const teamSelect = document.createElement("select");
+    assignableTeams.forEach((team) => {
+      const option = document.createElement("option");
+      option.value = team.id;
+      option.textContent = team.name;
+      teamSelect.append(option);
+    });
+    teamSelect.value = member.team_id || state.teamId;
+    teamSelect.addEventListener("change", (event) => {
+      member.team_id = event.target.value;
+    });
+
+    row.append(nameInput, emailInput, phoneInput, teamSelect, activeToggle);
     elements.rosterList.append(row);
   });
 };
@@ -336,36 +430,18 @@ const renderWeeksList = () => {
 const renderMemberCard = (member) => {
   ensureMemberData(member.id);
   const data = state.weekData.states[member.id];
-  const roleplays = state.weekData.roleplays[member.id];
 
   const card = document.createElement("div");
   card.className = "member-card";
 
   const title = document.createElement("h3");
   title.textContent = member.name;
-
-  const checklist = document.createElement("div");
-  checklist.className = "checklist";
-
-  const weeklyFocus = document.createElement("label");
-  const weeklyFocusInput = document.createElement("input");
-  weeklyFocusInput.type = "checkbox";
-  weeklyFocusInput.checked = data.weeklyFocusSet;
-  weeklyFocusInput.addEventListener("change", (event) => {
-    data.weeklyFocusSet = event.target.checked;
-  });
-  weeklyFocus.append(weeklyFocusInput, "Weekly focus set");
-
-  const roleplayDone = document.createElement("label");
-  const roleplayInput = document.createElement("input");
-  roleplayInput.type = "checkbox";
-  roleplayInput.checked = data.roleplayDone;
-  roleplayInput.addEventListener("change", (event) => {
-    data.roleplayDone = event.target.checked;
-  });
-  roleplayDone.append(roleplayInput, "Roleplay done");
-
-  checklist.append(weeklyFocus, roleplayDone);
+  if (state.teamId === "all" && member.team_id) {
+    const teamChip = document.createElement("span");
+    teamChip.className = "team-chip";
+    teamChip.textContent = getTeamLabel(member.team_id);
+    title.append(teamChip);
+  }
 
   const counters = document.createElement("div");
   counters.className = "stack";
@@ -400,77 +476,18 @@ const renderMemberCard = (member) => {
     return wrapper;
   };
 
-  counters.append(
-    buildCounter("First meetings", "firstMeetings"),
-    buildCounter("Signed recruits", "signedRecruits")
-  );
+  counters.append(buildCounter("Recruits", "signedRecruits"));
 
-  const roleplaySection = document.createElement("div");
-  roleplaySection.className = "stack";
-  const roleplayTitle = document.createElement("strong");
-  roleplayTitle.textContent = "Roleplay logs";
-
-  const roleplayList = document.createElement("div");
-  roleplayList.className = "stack";
-
-  const renderRoleplays = () => {
-    roleplayList.innerHTML = "";
-    const currentRoleplays = state.weekData.roleplays[member.id] || [];
-    currentRoleplays.forEach((entry) => {
-      const row = document.createElement("div");
-      row.className = "roleplay-item";
-      const type = document.createElement("input");
-      type.value = entry.type;
-      type.addEventListener("input", (event) => {
-        entry.type = event.target.value;
-      });
-      const note = document.createElement("input");
-      note.value = entry.note || "";
-      note.addEventListener("input", (event) => {
-        entry.note = event.target.value;
-      });
-      const timestamp = document.createElement("span");
-      timestamp.className = "muted";
-      timestamp.textContent = new Date(entry.timestamp).toLocaleString();
-      const remove = document.createElement("button");
-      remove.className = "danger";
-      remove.textContent = "Remove";
-      remove.addEventListener("click", () => {
-        state.weekData.roleplays[member.id] = currentRoleplays.filter(
-          (r) => r.id !== entry.id
-        );
-        renderRoleplays();
-      });
-      row.append(type, note, timestamp, remove);
-      roleplayList.append(row);
-    });
-  };
-
-  const roleplayControls = document.createElement("div");
-  roleplayControls.className = "inline";
-  const roleplayType = document.createElement("input");
-  roleplayType.placeholder = "Type (pitch, objection, close)";
-  const roleplayNote = document.createElement("input");
-  roleplayNote.placeholder = "Notes";
-  const addRoleplay = document.createElement("button");
-  addRoleplay.className = "secondary";
-  addRoleplay.textContent = "Add";
-  addRoleplay.addEventListener("click", () => {
-    if (!roleplayType.value.trim()) return;
-    state.weekData.roleplays[member.id].push({
-      id: crypto.randomUUID(),
-      type: roleplayType.value.trim(),
-      note: roleplayNote.value.trim(),
-      timestamp: new Date().toISOString(),
-    });
-    roleplayType.value = "";
-    roleplayNote.value = "";
-    renderRoleplays();
+  const goalsField = document.createElement("label");
+  goalsField.className = "field";
+  const goalsLabel = document.createElement("span");
+  goalsLabel.textContent = "Goals";
+  const goalsInput = document.createElement("textarea");
+  goalsInput.value = data.goals || "";
+  goalsInput.addEventListener("input", (event) => {
+    data.goals = event.target.value;
   });
-  roleplayControls.append(roleplayType, roleplayNote, addRoleplay);
-
-  roleplaySection.append(roleplayTitle, roleplayList, roleplayControls);
-  renderRoleplays();
+  goalsField.append(goalsLabel, goalsInput);
 
   const notesField = document.createElement("label");
   notesField.className = "field";
@@ -483,7 +500,7 @@ const renderMemberCard = (member) => {
   });
   notesField.append(notesLabel, notesInput);
 
-  card.append(title, checklist, counters, roleplaySection, notesField);
+  card.append(title, counters, goalsField, notesField);
   return card;
 };
 
@@ -554,7 +571,63 @@ const renderWeeklyTasks = (activeMembers) => {
           total > 0 ? `${present}/${total} marked` : "No active members";
       };
 
-      header.append(labelInput, summary);
+      const checkAllLabel = document.createElement("label");
+      checkAllLabel.className = "attendance-toggle attendance-toggle--all";
+      const checkAllInput = document.createElement("input");
+      checkAllInput.type = "checkbox";
+      const checkAllText = document.createElement("span");
+      checkAllText.textContent = "Check all";
+
+      const updateCheckAll = () => {
+        const allChecked =
+          activeMembers.length > 0 &&
+          activeMembers.every(
+            (member) =>
+              state.weekData.taskAttendance?.[task.id]?.[member.id] === true
+          );
+        checkAllInput.checked = allChecked;
+        checkAllInput.disabled = activeMembers.length === 0;
+      };
+
+      checkAllInput.addEventListener("change", (event) => {
+        if (!state.weekData.taskAttendance[task.id]) {
+          state.weekData.taskAttendance[task.id] = {};
+        }
+        activeMembers.forEach((member) => {
+          state.weekData.taskAttendance[task.id][member.id] =
+            event.target.checked;
+        });
+        renderTaskRows();
+      });
+
+      checkAllLabel.append(checkAllInput, checkAllText);
+
+      header.append(labelInput, summary, checkAllLabel);
+
+      const metaRow = document.createElement("div");
+      metaRow.className = "task-meta";
+
+      const categorySelect = document.createElement("select");
+      TASK_CATEGORIES.forEach((category) => {
+        const option = document.createElement("option");
+        option.value = category.value;
+        option.textContent = category.label;
+        categorySelect.append(option);
+      });
+      categorySelect.value = task.category || "general";
+      categorySelect.addEventListener("change", (event) => {
+        task.category = event.target.value;
+      });
+
+      const notesInput = document.createElement("input");
+      notesInput.type = "text";
+      notesInput.placeholder = "Task notes (optional)";
+      notesInput.value = task.notes || "";
+      notesInput.addEventListener("input", (event) => {
+        task.notes = event.target.value;
+      });
+
+      metaRow.append(categorySelect, notesInput);
 
       const attendanceList = document.createElement("div");
       attendanceList.className = "attendance-list";
@@ -580,44 +653,24 @@ const renderWeeklyTasks = (activeMembers) => {
             state.weekData.taskAttendance[task.id][member.id] =
               event.target.checked;
             updateSummary();
+            updateCheckAll();
           });
           const name = document.createElement("span");
           name.textContent = member.name;
-          toggle.append(checkbox, name);
+          if (state.teamId === "all" && member.team_id) {
+            const teamChip = document.createElement("span");
+            teamChip.className = "team-chip";
+            teamChip.textContent = getTeamLabel(member.team_id);
+            toggle.append(checkbox, name, teamChip);
+          } else {
+            toggle.append(checkbox, name);
+          }
           attendanceList.append(toggle);
         });
       }
 
       const actions = document.createElement("div");
       actions.className = "task-actions";
-
-      const markAll = document.createElement("button");
-      markAll.type = "button";
-      markAll.className = "secondary";
-      markAll.textContent = "Mark all";
-      markAll.addEventListener("click", () => {
-        if (!state.weekData.taskAttendance[task.id]) {
-          state.weekData.taskAttendance[task.id] = {};
-        }
-        activeMembers.forEach((member) => {
-          state.weekData.taskAttendance[task.id][member.id] = true;
-        });
-        renderTaskRows();
-      });
-
-      const clearAll = document.createElement("button");
-      clearAll.type = "button";
-      clearAll.className = "secondary";
-      clearAll.textContent = "Clear all";
-      clearAll.addEventListener("click", () => {
-        if (!state.weekData.taskAttendance[task.id]) {
-          state.weekData.taskAttendance[task.id] = {};
-        }
-        activeMembers.forEach((member) => {
-          state.weekData.taskAttendance[task.id][member.id] = false;
-        });
-        renderTaskRows();
-      });
 
       const remove = document.createElement("button");
       remove.className = "danger";
@@ -631,10 +684,11 @@ const renderWeeklyTasks = (activeMembers) => {
         renderTaskRows();
       });
 
-      actions.append(markAll, clearAll, remove);
+      actions.append(remove);
 
       updateSummary();
-      row.append(header, attendanceList, actions);
+      updateCheckAll();
+      row.append(header, metaRow, attendanceList, actions);
       list.append(row);
     });
   };
@@ -648,7 +702,12 @@ const renderWeeklyTasks = (activeMembers) => {
   addTask.textContent = "Add task";
   addTask.addEventListener("click", () => {
     const id = crypto.randomUUID();
-    state.weekData.weekTasks.push({ id, label: "" });
+    state.weekData.weekTasks.push({
+      id,
+      label: "",
+      category: "general",
+      notes: "",
+    });
     state.weekData.taskAttendance[id] = {};
     state.roster.forEach((member) => {
       state.weekData.taskAttendance[id][member.id] = false;
@@ -668,12 +727,30 @@ const renderWeeklyTasks = (activeMembers) => {
 const renderMembers = () => {
   elements.membersPanel.innerHTML = "";
   const activeMembers = state.roster.filter((member) => member.active);
-  renderWeeklyTasks(activeMembers);
-  if (activeMembers.length === 0) {
+  const memberFilterText =
+    state.teamId === "all" ? getFilterText(state.memberFilter) : "";
+  const visibleMembers =
+    state.teamId === "all" && memberFilterText
+      ? activeMembers.filter((member) =>
+          member.name?.toLowerCase().includes(memberFilterText)
+        )
+      : activeMembers;
+  renderWeeklyTasks(visibleMembers);
+  if (elements.toggleMembers) {
+    elements.toggleMembers.textContent = state.membersExpanded
+      ? "Hide individuals"
+      : "Edit individuals";
+  }
+  if (!state.membersExpanded) {
+    elements.membersPanel.classList.add("hidden");
+    return;
+  }
+  elements.membersPanel.classList.remove("hidden");
+  if (visibleMembers.length === 0) {
     elements.membersPanel.textContent = "No active members yet.";
     return;
   }
-  activeMembers.forEach((member) => {
+  visibleMembers.forEach((member) => {
     elements.membersPanel.append(renderMemberCard(member));
   });
 };
@@ -725,7 +802,7 @@ const exportHistory = async (query, label) => {
     });
 
     const stateRows = await sql`
-      SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes
+      SELECT member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, goals, notes
       FROM member_week_state
       WHERE week_id = ${week.id}
     `;
@@ -738,12 +815,13 @@ const exportHistory = async (query, label) => {
         roleplayDone: row.roleplay_done,
         firstMeetings: row.first_meetings,
         signedRecruits: row.signed_recruits,
+        goals: row.goals || "",
         notes: row.notes || "",
       };
     });
 
     const taskRows = await sql`
-      SELECT id, label
+      SELECT id, label, category, notes
       FROM weekly_tasks
       WHERE week_id = ${week.id}
       ORDER BY created_at ASC
@@ -787,6 +865,8 @@ const exportHistory = async (query, label) => {
       weekTasks: taskRows.map((row) => ({
         id: row.id,
         label: row.label,
+        category: row.category || "general",
+        notes: row.notes || "",
         attendance: taskAttendance[row.id] || {},
       })),
       members: Array.from(memberMap.values()),
@@ -808,12 +888,14 @@ const saveRoster = async () => {
     const name = member.name?.trim() || "";
     const email = member.email?.trim() || null;
     const phone = member.phone?.trim() || null;
+    const teamId = member.team_id || state.teamId;
     await sql`
       UPDATE members
       SET name = ${name},
           active = ${Boolean(member.active)},
           email = ${email},
           phone = ${phone},
+          team_id = ${teamId},
           updated_at = NOW()
       WHERE id = ${member.id}
     `;
@@ -830,7 +912,7 @@ const saveWeek = async () => {
     const memberState = state.weekData.states[member.id];
     await sql`
       INSERT INTO member_week_state
-        (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, notes, updated_at)
+        (week_id, member_id, weekly_focus_set, roleplay_done, first_meetings, signed_recruits, goals, notes, updated_at)
       VALUES (
         ${weekId},
         ${member.id},
@@ -838,6 +920,7 @@ const saveWeek = async () => {
         ${Boolean(memberState.roleplayDone)},
         ${Number(memberState.firstMeetings) || 0},
         ${Number(memberState.signedRecruits) || 0},
+        ${memberState.goals || ""},
         ${memberState.notes || ""},
         NOW()
       )
@@ -847,6 +930,7 @@ const saveWeek = async () => {
         roleplay_done = EXCLUDED.roleplay_done,
         first_meetings = EXCLUDED.first_meetings,
         signed_recruits = EXCLUDED.signed_recruits,
+        goals = EXCLUDED.goals,
         notes = EXCLUDED.notes,
         updated_at = NOW()
     `;
@@ -884,10 +968,21 @@ const saveWeek = async () => {
   for (const task of state.weekData.weekTasks) {
     if (!task.id || !task.label?.trim()) continue;
     await sql`
-      INSERT INTO weekly_tasks (id, week_id, label, updated_at)
-      VALUES (${task.id}, ${weekId}, ${task.label.trim()}, NOW())
+      INSERT INTO weekly_tasks (id, week_id, label, category, notes, updated_at)
+      VALUES (
+        ${task.id},
+        ${weekId},
+        ${task.label.trim()},
+        ${task.category || "general"},
+        ${task.notes || ""},
+        NOW()
+      )
       ON CONFLICT (id)
-      DO UPDATE SET label = EXCLUDED.label, updated_at = NOW()
+      DO UPDATE SET
+        label = EXCLUDED.label,
+        category = EXCLUDED.category,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
     `;
   }
 
@@ -923,8 +1018,15 @@ const initialize = async () => {
 
   await loadTeams();
   if (state.teams.length > 0) {
-    state.teamId = state.teams[0].id;
+    const allTeam = state.teams.find((team) => team.id === "all");
+    state.teamId = allTeam ? allTeam.id : state.teams[0].id;
     elements.teamSelect.value = state.teamId;
+  }
+  if (elements.newMemberTeam.options.length > 0) {
+    elements.newMemberTeam.value =
+      state.teamId === "all"
+        ? elements.newMemberTeam.options[0].value
+        : state.teamId;
   }
 
   state.isoWeek = getIsoWeekString(getDenverNow());
@@ -934,6 +1036,13 @@ const initialize = async () => {
   await loadWeek();
   await loadWeeksList();
 
+  updateFilterVisibility();
+  if (elements.rosterFilter) {
+    elements.rosterFilter.value = state.rosterFilter;
+  }
+  if (elements.memberFilter) {
+    elements.memberFilter.value = state.memberFilter;
+  }
   renderRoster();
   renderMembers();
   renderWeeksList();
@@ -947,9 +1056,16 @@ elements.teamSelect.addEventListener("change", async (event) => {
   state.teamId = event.target.value;
   state.isoWeek = getIsoWeekString(getDenverNow());
   elements.isoWeek.value = state.isoWeek;
+  if (elements.newMemberTeam.options.length > 0) {
+    elements.newMemberTeam.value =
+      state.teamId === "all"
+        ? elements.newMemberTeam.options[0].value
+        : state.teamId;
+  }
   await loadRoster();
   await loadWeek();
   await loadWeeksList();
+  updateFilterVisibility();
   renderRoster();
   renderMembers();
   renderWeeksList();
@@ -960,11 +1076,12 @@ elements.addMember.addEventListener("click", async () => {
   if (!name) return;
   const email = elements.newMemberEmail.value.trim();
   const phone = elements.newMemberPhone.value.trim();
+  const selectedTeam = elements.newMemberTeam.value || state.teamId;
   const sql = getSql();
   const rows = await sql`
     INSERT INTO members (team_id, name, active, email, phone)
-    VALUES (${state.teamId}, ${name}, true, ${email || null}, ${phone || null})
-    RETURNING id, name, active, email, phone
+    VALUES (${selectedTeam}, ${name}, true, ${email || null}, ${phone || null})
+    RETURNING id, name, active, email, phone, team_id
   `;
   const member = rows[0];
   if (member) {
@@ -1003,6 +1120,21 @@ elements.clearToken.addEventListener("click", () => {
 elements.actorSelect.addEventListener("change", (event) => {
   state.actor = event.target.value;
   localStorage.setItem("fitHubActor", state.actor);
+});
+
+elements.toggleMembers.addEventListener("click", () => {
+  state.membersExpanded = !state.membersExpanded;
+  renderMembers();
+});
+
+elements.rosterFilter.addEventListener("input", (event) => {
+  state.rosterFilter = event.target.value;
+  renderRoster();
+});
+
+elements.memberFilter.addEventListener("input", (event) => {
+  state.memberFilter = event.target.value;
+  renderMembers();
 });
 
 initialize().catch((error) => {
