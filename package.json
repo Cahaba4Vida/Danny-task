@@ -1,0 +1,9 @@
+{
+  "name": "fit-hub",
+  "version": "1.0.0",
+  "description": "Fit Hub leader dashboard",
+  "private": true,
+  "dependencies": {
+    "@netlify/blobs": "^6.1.0"
+  }
+}
